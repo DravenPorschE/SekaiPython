@@ -243,21 +243,21 @@ def monitor_fsr():
                 
                 if timesClicked == 2:
                     print("Sekai is awake, say a command")
-
+                    
                     engine.save_to_file("Hello, USB headphones with a new voice!", "output.wav")
                     engine.runAndWait()
-
-                    while not os.path.exists("output.wav"):
-                        time.sleep(0.1)
-
-                    # Play through USB headphones
-                    os.system("aplay -D plughw:1,0 output.wav")
 
                     # Switch to smile view
                     root.after(0, show_smile)
                     # Turn on LED
                     GPIO.output(LED_PIN, GPIO.HIGH)
                     timesClicked = 0
+
+                    while not os.path.exists("output.wav"):
+                        time.sleep(0.1)
+
+                    # Play through USB headphones
+                    os.system("aplay -D plughw:1,0 output.wav")
                     
                     # Wait 5 seconds then turn off LED (but keep smile)
                     time.sleep(5)
