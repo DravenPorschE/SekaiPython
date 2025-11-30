@@ -1,38 +1,28 @@
 import pyttsx3
 import os
+import time
 
-# Initialize TTS engine
+# Initialize engine
 engine = pyttsx3.init()
 
-# ----------------------------
-# Optional: choose a female voice
-# ----------------------------
+# List available voices
 voices = engine.getProperty('voices')
-female_voice = None
-for voice in voices:
-    if "f" in voice.id.lower():  # 'english+f1', 'english+f2', etc.
-        female_voice = voice.id
-        break
+for idx, voice in enumerate(voices):
+    print(f"{idx}: {voice.name} - {voice.id}")
 
-if female_voice:
-    engine.setProperty('voice', female_voice)
+# Choose a voice by index (e.g., 1)
+engine.setProperty('voice', voices[1].id)
 
-# Optional: set speed and volume
-engine.setProperty('rate', 150)    # words per minute
-engine.setProperty('volume', 0.8)  # 0.0 to 1.0
+# Optional: change speed and volume
+engine.setProperty('rate', 150)    # Speed
+engine.setProperty('volume', 0.8)  # Volume 0.0 to 1.0
 
-# ----------------------------
-# Text you want to speak
-# ----------------------------
-text_to_speak = "Hello! This is a female voice speaking through the USB headphones."
+# Convert text to WAV
+engine.save_to_file("Hello, USB headphones with a new voice!", "output.wav")
+engine.runAndWait()
 
-# Save to WAV file (for reliable USB playback)
-wav_file = "/home/pi/output.wav"  # use absolute path
-engine.save_to_file(text_to_speak, wav_file)
-engine.runAndWait()  # ensure file is fully written
+while not os.path.exists("output.wav"):
+    time.sleep(0.1)
 
-# ----------------------------
 # Play through USB headphones
-# ----------------------------
-os.system(f"aplay -D plughw:1,0 {wav_file}")
-+
+os.system("aplay -D plughw:1,0 output.wav")
