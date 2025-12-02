@@ -11,9 +11,7 @@ import RPi.GPIO as GPIO
 import threading
 import random
 import os
-
 from datetime import datetime, timedelta, date
-
 from weather import get_weather_for_city_json
 
 today = date.today()
@@ -79,152 +77,212 @@ calendar_frame.columnconfigure(0, weight=0)
 calendar_frame.columnconfigure(1, weight=1)
 calendar_frame.rowconfigure(0, weight=1)
 
-# SMILING FIGURE VIEW FRAME
-smile_frame = tk.Frame(container, bg="white")
-smile_frame.rowconfigure(0, weight=1)
-smile_frame.columnconfigure(0, weight=1)
+# SEKAI FACE VIEW FRAME
+face_frame = tk.Frame(container, bg="white")
+face_frame.rowconfigure(0, weight=1)
+face_frame.columnconfigure(0, weight=1)
 
-# Label to display GIF
-face_label = tk.Label(smile_frame, bg="white")
+# Label to display Sekai's face
+face_label = tk.Label(face_frame, bg="white")
 face_label.grid(row=0, column=0, sticky="nsew")
 
-# Variables for GIF animation and mood
-current_gif_frames = []
-current_frame_index = 0
-gif_animation_id = None
+# Variables for mood and sleep timer
 current_mood = "happy"
+current_photo = None
 sleep_timer_id = None
 last_interaction_time = time.time()
+idle_timer_start = None
+is_idle = False
 
-def load_gif(gif_name):
-    """Load GIF frames from sekai_faces folder"""
-    global current_gif_frames
+def load_image(image_name):
+    """Load JPG image from sekai_faces folder and resize to fit screen"""
     try:
         from PIL import Image, ImageTk
         
         script_dir = os.path.dirname(os.path.abspath(__file__))
         sekai_faces_dir = os.path.join(script_dir, "sekai_faces")
         
-        # First, check if the file exists with different extensions
-        possible_extensions = ['.gif', '.GIF']
-        gif_path = None
+        # Try different possible extensions
+        possible_extensions = ['.jpg', '.JPG', '.jpeg', '.JPEG', '.png', '.PNG']
+        image_path = None
         
+        # First try with extension
         for ext in possible_extensions:
-            test_path = os.path.join(sekai_faces_dir, gif_name + ext)
+            test_path = os.path.join(sekai_faces_dir, image_name + ext)
             if os.path.exists(test_path):
-                gif_path = test_path
-                break
-            # Also check with the name as-is
-            test_path = os.path.join(sekai_faces_dir, gif_name)
-            if os.path.exists(test_path):
-                gif_path = test_path
+                image_path = test_path
+                print(f"Found image: {image_path}")
                 break
         
-        if not gif_path:
+        # If not found with extension, try the name as-is
+        if not image_path:
+            test_path = os.path.join(sekai_faces_dir, image_name)
+            if os.path.exists(test_path):
+                image_path = test_path
+                print(f"Found image: {image_path}")
+        
+        if not image_path:
+            print(f"Image not found: {image_name}")
             # List available files for debugging
-            available_files = os.listdir(sekai_faces_dir)
-            print(f"GIF not found: {gif_name}")
-            print(f"Available files in sekai_faces: {available_files}")
-            return []
+            if os.path.exists(sekai_faces_dir):
+                available_files = os.listdir(sekai_faces_dir)
+                print(f"Available files in sekai_faces: {available_files}")
+            else:
+                print(f"Directory not found: {sekai_faces_dir}")
+            return None
         
-        img = Image.open(gif_path)
+        # Open and resize image
+        img = Image.open(image_path)
         
-        frames = []
-        try:
-            while True:
-                # Resize frame to fit screen
-                frame = img.copy()
-                frame = frame.resize((screen_width, screen_height), Image.Resampling.LANCZOS)
-                frames.append(ImageTk.PhotoImage(frame))
-                img.seek(len(frames))
-        except EOFError:
-            pass
+        # Calculate scaling to fit screen while maintaining aspect ratio
+        img_width, img_height = img.size
+        screen_ratio = screen_width / screen_height
+        img_ratio = img_width / img_height
         
-        print(f"Loaded {len(frames)} frames from {gif_path}")
-        return frames
+        if img_ratio > screen_ratio:
+            # Image is wider than screen
+            new_width = screen_width
+            new_height = int(screen_width / img_ratio)
+        else:
+            # Image is taller than screen
+            new_height = screen_height
+            new_width = int(screen_height * img_ratio)
+        
+        # Resize with high-quality filtering
+        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        # Convert to PhotoImage
+        photo = ImageTk.PhotoImage(img)
+        
+        print(f"Loaded image: {image_name} ({img_width}x{img_height} -> {new_width}x{new_height})")
+        return photo
+        
     except ImportError as e:
         print(f"PIL import error: {e}")
         print("Install PIL with: pip install Pillow")
-        return []
+        return None
     except Exception as e:
-        print(f"Error loading GIF {gif_name}: {e}")
+        print(f"Error loading image {image_name}: {e}")
         import traceback
         traceback.print_exc()
-        return []
-
-def animate_gif():
-    """Animate the current GIF"""
-    global current_frame_index, gif_animation_id
-    
-    if current_gif_frames:
-        face_label.config(image=current_gif_frames[current_frame_index])
-        current_frame_index = (current_frame_index + 1) % len(current_gif_frames)
-        gif_animation_id = face_label.after(100, animate_gif)
+        return None
 
 def set_mood(mood):
-    """Set Sekai's mood and display the appropriate GIF smoothly."""
-    global current_mood, current_frame_index, gif_animation_id, last_interaction_time
-
-    current_mood = mood
-    current_frame_index = 0
-    last_interaction_time = time.time()
-
-    # Cancel existing animation if any
-    if gif_animation_id:
-        face_label.after_cancel(gif_animation_id)
-        gif_animation_id = None
-
-    # Clear current image first
-    face_label.config(image='')
-    root.update_idletasks()
+    """Set Sekai's mood and display the appropriate JPG image"""
+    global current_mood, current_photo, last_interaction_time, idle_timer_start, is_idle
     
-    # Define mood to file mapping (with common variations)
+    # Cancel any existing sleep timer
+    if sleep_timer_id:
+        root.after_cancel(sleep_timer_id)
+    
+    current_mood = mood
+    last_interaction_time = time.time()
+    
+    # Reset idle state if we're setting a mood explicitly
+    if mood != "sleeping":
+        is_idle = False
+        idle_timer_start = None
+    
+    print(f"Setting mood to: {mood}")
+    
+    # Define mood to file mapping
     mood_mapping = {
-        'happy': ['happy', 'hapy', 'smile'],
-        'angry': ['angry', 'mad'],
-        'sleeping': ['sleeping', 'sleep', 'asleep']
+        'happy': ['happy', 'hapy', 'smile', 'smiling'],
+        'angry': ['angry', 'mad', 'angry_face'],
+        'sleeping': ['sleeping', 'sleep', 'asleep', 'zzz']
     }
     
     # Try different possible filenames for the mood
-    frames = []
+    photo = None
     possible_names = mood_mapping.get(mood, [mood])
     
     for name in possible_names:
-        frames = load_gif(name)
-        if frames:
-            print(f"Successfully loaded GIF for {mood} using filename: {name}")
+        photo = load_image(name)
+        if photo:
+            print(f"Successfully loaded image for {mood} using filename: {name}")
             break
     
-    if not frames:
-        print(f"Failed to load any GIF for mood: {mood}")
-        # Try to load a fallback
-        if mood != "happy":
-            frames = load_gif("happy")
-        if not frames:
-            # Create a colored rectangle as fallback
-            from PIL import Image, ImageDraw
-            colors = {'happy': 'green', 'angry': 'red', 'sleeping': 'blue'}
-            color = colors.get(mood, 'gray')
-            img = Image.new('RGB', (screen_width, screen_height), color)
-            draw = ImageDraw.Draw(img)
-            draw.text((screen_width//2, screen_height//2), f"{mood}", fill="white", anchor="mm")
-            photo = ImageTk.PhotoImage(img)
-            face_label.config(image=photo)
-            face_label.image = photo  # Keep reference
-            return
+    if not photo:
+        print(f"Failed to load any image for mood: {mood}")
+        # Create a colored rectangle as fallback
+        from PIL import Image, ImageDraw, ImageFont
+        colors = {'happy': '#4CAF50', 'angry': '#F44336', 'sleeping': '#2196F3'}
+        color = colors.get(mood, '#9E9E9E')
+        
+        # Create a simple colored image with text
+        img = Image.new('RGB', (screen_width, screen_height), color)
+        draw = ImageDraw.Draw(img)
+        
+        # Try to load a font, fall back to default
+        try:
+            # Try different font paths
+            font_paths = [
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                "/System/Library/Fonts/Helvetica.ttc"
+            ]
+            font = None
+            for path in font_paths:
+                if os.path.exists(path):
+                    try:
+                        font = ImageFont.truetype(path, 40)
+                        break
+                    except:
+                        continue
+            if not font:
+                font = ImageFont.load_default()
+        except:
+            font = ImageFont.load_default()
+        
+        # Draw text
+        text = f"Sekai is {mood}"
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        x = (screen_width - text_width) // 2
+        y = (screen_height - text_height) // 2
+        
+        draw.text((x, y), text, fill="white", font=font)
+        photo = ImageTk.PhotoImage(img)
+    
+    # Display the image
+    face_label.config(image=photo)
+    face_label.image = photo  # Keep reference to prevent garbage collection
+    current_photo = photo
+    
+    # If setting to sleeping mood, don't start a new sleep timer
+    if mood != "sleeping":
+        reset_idle_timer()
+    
+    print(f"Mood set to: {mood}")
 
-    # Assign frames to global
-    global current_gif_frames
-    current_gif_frames = frames
+def reset_idle_timer():
+    """Reset the idle timer that triggers sleeping mode"""
+    global sleep_timer_id, idle_timer_start, is_idle
+    
+    if is_idle:
+        return
+    
+    # Cancel existing timer
+    if sleep_timer_id:
+        root.after_cancel(sleep_timer_id)
+    
+    # Start new timer for 20 seconds
+    sleep_timer_id = root.after(20000, go_to_sleep)
+    idle_timer_start = time.time()
+    print(f"Idle timer reset. Will sleep in 20 seconds.")
 
-    # Start animation with slight delay to ensure label is ready
-    root.after(50, animate_gif)
+def go_to_sleep():
+    """Switch to sleeping mode after 20 seconds of inactivity"""
+    global current_mood, is_idle
+    
+    if current_view == "face" and current_mood != "sleeping":
+        print("20 seconds idle detected. Going to sleep...")
+        is_idle = True
+        set_mood("sleeping")
 
-    # Reset sleep timer
-    reset_sleep_timer()
-
-def check_gif_files():
-    """Check if required GIF files exist and are readable"""
+def check_available_images():
+    """Check if required image files exist and are readable"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     sekai_faces_dir = os.path.join(script_dir, "sekai_faces")
     
@@ -233,49 +291,31 @@ def check_gif_files():
         print("Please create a 'sekai_faces' folder in the same directory as this script.")
         return False
     
-    print(f"Checking GIF files in: {sekai_faces_dir}")
+    print(f"Checking image files in: {sekai_faces_dir}")
     available_files = os.listdir(sekai_faces_dir)
     print(f"Available files: {available_files}")
     
-    required_moods = ['happy', 'angry', 'sleeping']
-    for mood in required_moods:
+    # Check for each mood
+    moods = ['happy', 'angry', 'sleeping']
+    image_extensions = ['.jpg', '.jpeg', '.png', '.JPG', '.JPEG', '.PNG']
+    
+    for mood in moods:
         found = False
         for filename in available_files:
-            if mood in filename.lower() and filename.lower().endswith(('.gif', '.png', '.jpg')):
+            name_lower = filename.lower()
+            mood_lower = mood.lower()
+            
+            # Check if mood is in filename and has image extension
+            if mood_lower in name_lower and any(name_lower.endswith(ext) for ext in image_extensions):
                 print(f"✓ Found {mood}: {filename}")
                 found = True
                 break
+        
         if not found:
-            print(f"✗ Missing file for mood: {mood}")
+            print(f"✗ Missing or could not identify image for mood: {mood}")
+            print(f"  Expected files like: {mood}.jpg, {mood}.png, etc.")
     
     return True
-
-def reset_sleep_timer():
-    """Reset the sleep timer"""
-    global sleep_timer_id, last_interaction_time
-    
-    last_interaction_time = time.time()
-    
-    if sleep_timer_id:
-        root.after_cancel(sleep_timer_id)
-    
-    # Only set timer if not already sleeping and in smile view
-    if current_mood != "sleeping" and current_view == "smile":
-        sleep_timer_id = root.after(20000, go_to_sleep)
-
-def go_to_sleep():
-    """Switch to sleeping mode after inactivity"""
-    global current_mood
-    if current_view == "smile" and current_mood != "sleeping":
-        set_mood("sleeping")
-
-def check_inactivity():
-    """Continuously check for inactivity"""
-    if current_view == "smile":
-        elapsed = time.time() - last_interaction_time
-        if elapsed >= 20 and current_mood != "sleeping":
-            go_to_sleep()
-    root.after(1000, check_inactivity)
 
 def fetch_weather(city="Lipa", api_key=None):
     try:
@@ -347,6 +387,10 @@ def refresh_weather(interval=3600):  # every hour
 
 # Build weather view
 def build_weather_view():
+    # Clear existing widgets
+    for widget in weather_frame.winfo_children():
+        widget.destroy()
+    
     # Left panel - Current weather
     left_weather = tk.Frame(weather_frame, bg="#f0f0f0", highlightbackground="gray", highlightthickness=1)
     left_weather.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
@@ -466,26 +510,31 @@ refresh_weather()
 def show_calendar():
     global current_view
     current_view = "calendar"
-    smile_frame.grid_remove()
+    face_frame.grid_remove()
     weather_frame.grid_remove()
     calendar_frame.grid(row=0, column=0, sticky="nsew")
     root.title("Calendar UI")
 
-def show_smile():
+def show_sekai_face():
+    """Show Sekai's face and set initial mood"""
     global current_view
-    current_view = "smile"
+    current_view = "face"
     calendar_frame.grid_remove()
     weather_frame.grid_remove()
-    smile_frame.grid(row=0, column=0, sticky="nsew")
-    root.update_idletasks()  # Ensure frame is drawn first
-    root.after(50, lambda: set_mood("happy"))  # Slight delay to start GIF
+    face_frame.grid(row=0, column=0, sticky="nsew")
+    
+    # Reset idle timer when showing face view
+    reset_idle_timer()
+    
+    # Set initial mood to happy
+    set_mood("happy")
     root.title("Sekai is listening...")
 
 def show_weather():
     global current_view
     current_view = "weather"
     calendar_frame.grid_remove()
-    smile_frame.grid_remove()
+    face_frame.grid_remove()
     weather_frame.grid(row=0, column=0, sticky="nsew")
     root.title("Weather")
 
@@ -494,16 +543,14 @@ def switch_view(event):
     if key == 'a':
         show_calendar()
     elif key == 'b':
-        show_smile()
+        show_sekai_face()
     elif key == 'c':
         show_weather()
     elif key == 'q':
         cleanup_and_quit()
 
-
-
-
 def cleanup_and_quit():
+    """Clean up GPIO and close the application"""
     GPIO.cleanup()
     root.destroy()
 
@@ -525,15 +572,18 @@ def monitor_fsr():
                 if timesClicked == 2:
                     print("Sekai is awake, say a command")
 
-                    # Determine emotion
+                    # Determine emotion (90% happy, 10% angry)
                     emotion = random.choices(
                         ["happy", "angry"],
                         weights=[9, 1]
                     )[0]
 
-                    # Switch to smile view first
-                    if current_view != "smile":
-                        root.after(0, show_smile)
+                    # Switch to face view first
+                    if current_view != "face":
+                        root.after(0, show_sekai_face)
+                    else:
+                        # If already in face view, reset idle timer
+                        reset_idle_timer()
                     
                     # Set the mood based on emotion
                     root.after(100, lambda e=emotion: set_mood(e))
@@ -551,12 +601,14 @@ def monitor_fsr():
 
                     # Pick a random file inside that folder
                     files = os.listdir(audio_folder)
-                    audioToPlay = os.path.join(audio_folder, random.choice(files))
-
-                    # Play through USB headphones
-                    os.system(f"aplay -D plughw:1,0 {audioToPlay}")
+                    if files:
+                        audioToPlay = os.path.join(audio_folder, random.choice(files))
+                        # Play through USB headphones
+                        os.system(f"aplay -D plughw:1,0 {audioToPlay}")
+                    else:
+                        print(f"No audio files found in {audio_folder}")
                     
-                    # Wait 5 seconds then turn off LED (but keep smile)
+                    # Wait 5 seconds then turn off LED
                     time.sleep(5)
                     GPIO.output(LED_PIN, GPIO.LOW)
                     print("Sekai stopped listening")
@@ -575,21 +627,20 @@ def monitor_fsr():
 fsr_thread = threading.Thread(target=monitor_fsr, daemon=True)
 fsr_thread.start()
 
-# Start inactivity checker
-check_inactivity()
-
-# Start with weather view to test the design
-show_weather()
-
 # Handle window close
 root.protocol("WM_DELETE_WINDOW", cleanup_and_quit)
 
 try:
-    # Check GIF files at startup
-    check_gif_files()
+    # Check image files at startup
+    check_available_images()
 
-    # Start with smile view to test GIF loading
-    show_smile()
+    # Start with face view
+    show_sekai_face()
     root.mainloop()
 except KeyboardInterrupt:
+    cleanup_and_quit()
+except Exception as e:
+    print(f"Unexpected error: {e}")
+    import traceback
+    traceback.print_exc()
     cleanup_and_quit()
