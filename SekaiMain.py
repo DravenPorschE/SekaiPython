@@ -101,7 +101,8 @@ def load_gif(gif_name):
     global current_gif_frames
     try:
         from PIL import Image, ImageTk
-        gif_path = os.path.join("~/sekai_faces", gif_name)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        gif_path = os.path.join(script_dir, "sekai_faces", gif_name)
         img = Image.open(gif_path)
         
         frames = []
