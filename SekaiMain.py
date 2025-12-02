@@ -12,6 +12,8 @@ import threading
 import random
 import os
 
+from datetime import datetime, timedelta, date
+
 from weather import get_weather_for_city_json
 
 today = date.today()
