@@ -101,8 +101,32 @@ def load_gif(gif_name):
     global current_gif_frames
     try:
         from PIL import Image, ImageTk
+        
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        gif_path = os.path.join(script_dir, "sekai_faces", gif_name)
+        sekai_faces_dir = os.path.join(script_dir, "sekai_faces")
+        
+        # First, check if the file exists with different extensions
+        possible_extensions = ['.gif', '.GIF']
+        gif_path = None
+        
+        for ext in possible_extensions:
+            test_path = os.path.join(sekai_faces_dir, gif_name + ext)
+            if os.path.exists(test_path):
+                gif_path = test_path
+                break
+            # Also check with the name as-is
+            test_path = os.path.join(sekai_faces_dir, gif_name)
+            if os.path.exists(test_path):
+                gif_path = test_path
+                break
+        
+        if not gif_path:
+            # List available files for debugging
+            available_files = os.listdir(sekai_faces_dir)
+            print(f"GIF not found: {gif_name}")
+            print(f"Available files in sekai_faces: {available_files}")
+            return []
+        
         img = Image.open(gif_path)
         
         frames = []
@@ -116,10 +140,16 @@ def load_gif(gif_name):
         except EOFError:
             pass
         
-        current_gif_frames = frames
+        print(f"Loaded {len(frames)} frames from {gif_path}")
         return frames
+    except ImportError as e:
+        print(f"PIL import error: {e}")
+        print("Install PIL with: pip install Pillow")
+        return []
     except Exception as e:
         print(f"Error loading GIF {gif_name}: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 def animate_gif():
@@ -144,11 +174,44 @@ def set_mood(mood):
         face_label.after_cancel(gif_animation_id)
         gif_animation_id = None
 
-    # Load GIF frames
-    frames = load_gif(f"{mood}.gif")
+    # Clear current image first
+    face_label.config(image='')
+    root.update_idletasks()
+    
+    # Define mood to file mapping (with common variations)
+    mood_mapping = {
+        'happy': ['happy', 'hapy', 'smile'],
+        'angry': ['angry', 'mad'],
+        'sleeping': ['sleeping', 'sleep', 'asleep']
+    }
+    
+    # Try different possible filenames for the mood
+    frames = []
+    possible_names = mood_mapping.get(mood, [mood])
+    
+    for name in possible_names:
+        frames = load_gif(name)
+        if frames:
+            print(f"Successfully loaded GIF for {mood} using filename: {name}")
+            break
+    
     if not frames:
-        print(f"No frames loaded for {mood}, skipping animation.")
-        return
+        print(f"Failed to load any GIF for mood: {mood}")
+        # Try to load a fallback
+        if mood != "happy":
+            frames = load_gif("happy")
+        if not frames:
+            # Create a colored rectangle as fallback
+            from PIL import Image, ImageDraw
+            colors = {'happy': 'green', 'angry': 'red', 'sleeping': 'blue'}
+            color = colors.get(mood, 'gray')
+            img = Image.new('RGB', (screen_width, screen_height), color)
+            draw = ImageDraw.Draw(img)
+            draw.text((screen_width//2, screen_height//2), f"{mood}", fill="white", anchor="mm")
+            photo = ImageTk.PhotoImage(img)
+            face_label.config(image=photo)
+            face_label.image = photo  # Keep reference
+            return
 
     # Assign frames to global
     global current_gif_frames
@@ -159,6 +222,33 @@ def set_mood(mood):
 
     # Reset sleep timer
     reset_sleep_timer()
+
+def check_gif_files():
+    """Check if required GIF files exist and are readable"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    sekai_faces_dir = os.path.join(script_dir, "sekai_faces")
+    
+    if not os.path.exists(sekai_faces_dir):
+        print(f"ERROR: Directory not found: {sekai_faces_dir}")
+        print("Please create a 'sekai_faces' folder in the same directory as this script.")
+        return False
+    
+    print(f"Checking GIF files in: {sekai_faces_dir}")
+    available_files = os.listdir(sekai_faces_dir)
+    print(f"Available files: {available_files}")
+    
+    required_moods = ['happy', 'angry', 'sleeping']
+    for mood in required_moods:
+        found = False
+        for filename in available_files:
+            if mood in filename.lower() and filename.lower().endswith(('.gif', '.png', '.jpg')):
+                print(f"✓ Found {mood}: {filename}")
+                found = True
+                break
+        if not found:
+            print(f"✗ Missing file for mood: {mood}")
+    
+    return True
 
 def reset_sleep_timer():
     """Reset the sleep timer"""
@@ -447,6 +537,10 @@ def monitor_fsr():
                     
                     # Set the mood based on emotion
                     root.after(100, lambda e=emotion: set_mood(e))
+                    
+                    # Turn on LED
+                    GPIO.output(LED_PIN, GPIO.HIGH)
+                    timesClicked = 0
 
                     if emotion == "happy":
                         audio_folder = "voices_happy"
@@ -461,10 +555,6 @@ def monitor_fsr():
 
                     # Play through USB headphones
                     os.system(f"aplay -D plughw:1,0 {audioToPlay}")
-                    
-                    # Turn on LED
-                    GPIO.output(LED_PIN, GPIO.HIGH)
-                    timesClicked = 0
                     
                     # Wait 5 seconds then turn off LED (but keep smile)
                     time.sleep(5)
@@ -495,6 +585,11 @@ show_weather()
 root.protocol("WM_DELETE_WINDOW", cleanup_and_quit)
 
 try:
+    # Check GIF files at startup
+    check_gif_files()
+
+    # Start with smile view to test GIF loading
+    show_smile()
     root.mainloop()
 except KeyboardInterrupt:
     cleanup_and_quit()
