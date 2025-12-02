@@ -12,6 +12,8 @@ import threading
 import random
 import os
 
+from weather import get_weather_for_city_json
+
 today = date.today()
 year = today.year
 month = today.month
@@ -127,22 +129,31 @@ def animate_gif():
         gif_animation_id = face_label.after(100, animate_gif)
 
 def set_mood(mood):
-    """Set Sekai's mood and display appropriate GIF"""
-    global current_mood, current_frame_index, last_interaction_time
-    
+    """Set Sekai's mood and display the appropriate GIF smoothly."""
+    global current_mood, current_frame_index, gif_animation_id, last_interaction_time
+
     current_mood = mood
     current_frame_index = 0
     last_interaction_time = time.time()
-    
-    # Cancel existing animation
+
+    # Cancel existing animation if any
     if gif_animation_id:
         face_label.after_cancel(gif_animation_id)
-    
-    # Load and animate new GIF
-    gif_name = f"{mood}.gif"
-    load_gif(gif_name)
-    animate_gif()
-    
+        gif_animation_id = None
+
+    # Load GIF frames
+    frames = load_gif(f"{mood}.gif")
+    if not frames:
+        print(f"No frames loaded for {mood}, skipping animation.")
+        return
+
+    # Assign frames to global
+    global current_gif_frames
+    current_gif_frames = frames
+
+    # Start animation with slight delay to ensure label is ready
+    root.after(50, animate_gif)
+
     # Reset sleep timer
     reset_sleep_timer()
 
@@ -173,6 +184,47 @@ def check_inactivity():
             go_to_sleep()
     root.after(1000, check_inactivity)
 
+def fetch_weather(city="Lipa", api_key=None):
+    try:
+        data = get_weather_for_city_json(city, api_key=api_key)
+        # Map Sekai UI format
+        weather_data = {
+            "current": {
+                "day": data["current"]["day"],
+                "time": datetime.now().strftime("%I:%M %p"),
+                "temp": f"{data['current']['temp']}°C",
+                "location": f"{data['city']}",
+                "icon": f"{data['current']['simple'].replace(' ', '_')}_weather.png"
+            },
+            "forecast": []
+        }
+        for f in data["forecast"]:
+            weather_data["forecast"].append({
+                "day": f["day"],
+                "time": datetime.now().strftime("%I:%M %p"),
+                "temp": f"{f['temp_day']}°C",
+                "icon": f"{f['simple'].replace(' ', '_')}_weather.png"
+            })
+        return weather_data
+    except Exception as e:
+        print(f"Failed to fetch weather: {e}")
+        # Return fallback static data
+        return {
+            "current": {
+                "day": "Monday",
+                "time": "12:00 PM",
+                "temp": "34 C",
+                "location": "Lipa City",
+                "icon": "partly_cloudy_weather.png"
+            },
+            "forecast": [
+                {"day": "Tuesday", "time": "1:40 PM", "temp": "37C", "icon": "partly_cloudy_weather.png"},
+                {"day": "Wednesday", "time": "1:40 PM", "temp": "37C", "icon": "sunny_weather.png"},
+                {"day": "Thursday", "time": "1:40 PM", "temp": "37C", "icon": "thunderstorm_weather.png"},
+                {"day": "Friday", "time": "1:40 PM", "temp": "37C", "icon": "cloudy_weather.png"}
+            ]
+        }
+
 # WEATHER VIEW FRAME
 weather_frame = tk.Frame(container, bg="white")
 weather_frame.rowconfigure(0, weight=1)
@@ -180,21 +232,7 @@ weather_frame.columnconfigure(0, weight=1)
 weather_frame.columnconfigure(1, weight=1)
 
 # Weather data (test data matching your image)
-weather_data = {
-    "current": {
-        "day": "Monday",
-        "time": "1:40pm",
-        "temp": "34 C",
-        "location": "Lipa City",
-        "icon": "partly_cloudy_weather.png"
-    },
-    "forecast": [
-        {"day": "Tuesday", "time": "1:40pm", "temp": "37C", "icon": "partly_cloudy_weather.png"},
-        {"day": "Wednesday", "time": "1:40pm", "temp": "37C", "icon": "sunny_weather.png"},
-        {"day": "Thursday", "time": "1:40pm", "temp": "37C", "icon": "thunderstorm_weather.png"},
-        {"day": "Friday", "time": "1:40pm", "temp": "37C", "icon": "cloudy_weather.png"}
-    ]
-}
+weather_data = fetch_weather("Lipa")
 
 # Function to load weather icon
 def load_weather_icon(icon_name, size=(80, 80)):
@@ -207,6 +245,12 @@ def load_weather_icon(icon_name, size=(80, 80)):
     except Exception as e:
         print(f"Error loading icon {icon_name}: {e}")
         return None
+    
+def refresh_weather(interval=3600):  # every hour
+    global weather_data
+    weather_data = fetch_weather("Lipa")
+    build_weather_view()
+    root.after(interval * 1000, refresh_weather)
 
 # Build weather view
 def build_weather_view():
@@ -323,6 +367,7 @@ for r, week in enumerate(month_layout):
 
 # Build weather view
 build_weather_view()
+refresh_weather()  
 
 # View switching functions
 def show_calendar():
@@ -339,7 +384,8 @@ def show_smile():
     calendar_frame.grid_remove()
     weather_frame.grid_remove()
     smile_frame.grid(row=0, column=0, sticky="nsew")
-    set_mood("happy")  # Default to happy when showing smile
+    root.update_idletasks()  # Ensure frame is drawn first
+    root.after(50, lambda: set_mood("happy"))  # Slight delay to start GIF
     root.title("Sekai is listening...")
 
 def show_weather():
@@ -360,6 +406,9 @@ def switch_view(event):
         show_weather()
     elif key == 'q':
         cleanup_and_quit()
+
+
+
 
 def cleanup_and_quit():
     GPIO.cleanup()
