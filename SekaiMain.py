@@ -575,7 +575,7 @@ def monitor_fsr():
                     # Determine emotion (90% happy, 10% angry)
                     emotion = random.choices(
                         ["happy", "angry"],
-                        weights=[9, 1]
+                        weights=[7, 3]
                     )[0]
 
                     # Switch to face view first
