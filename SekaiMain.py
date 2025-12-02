@@ -335,7 +335,7 @@ def fetch_weather(city="Lipa", api_key=None):
             weather_data["forecast"].append({
                 "day": f["day"],
                 "time": datetime.now().strftime("%I:%M %p"),
-                "temp": f"{f['temp_day']}°C",
+                "temp": f"{f['temp']}°C",  # CHANGED FROM 'temp_day' TO 'temp'
                 "icon": f"{f['simple'].replace(' ', '_')}_weather.png"
             })
         return weather_data
@@ -358,16 +358,7 @@ def fetch_weather(city="Lipa", api_key=None):
             ]
         }
 
-# WEATHER VIEW FRAME
-weather_frame = tk.Frame(container, bg="white")
-weather_frame.rowconfigure(0, weight=1)
-weather_frame.columnconfigure(0, weight=1)
-weather_frame.columnconfigure(1, weight=1)
-
-# Weather data (test data matching your image)
-weather_data = fetch_weather("Lipa")
-
-# Function to load weather icon
+# Function to load weather icon with fallback
 def load_weather_icon(icon_name, size=(80, 80)):
     try:
         from PIL import Image, ImageTk
@@ -377,7 +368,26 @@ def load_weather_icon(icon_name, size=(80, 80)):
         return ImageTk.PhotoImage(img)
     except Exception as e:
         print(f"Error loading icon {icon_name}: {e}")
+        # Try to load a default/fallback image
+        try:
+            # Try cloudy as fallback since it's most generic
+            fallback_path = os.path.join("weather_assets", "cloudy_weather.png")
+            if os.path.exists(fallback_path):
+                img = Image.open(fallback_path)
+                img = img.resize(size, Image.Resampling.LANCZOS)
+                return ImageTk.PhotoImage(img)
+        except Exception as e2:
+            print(f"Failed to load fallback icon: {e2}")
         return None
+
+# WEATHER VIEW FRAME
+weather_frame = tk.Frame(container, bg="white")
+weather_frame.rowconfigure(0, weight=1)
+weather_frame.columnconfigure(0, weight=1)
+weather_frame.columnconfigure(1, weight=1)
+
+# Weather data (test data matching your image)
+weather_data = fetch_weather("Lipa")
     
 def refresh_weather(interval=3600):  # every hour
     global weather_data
