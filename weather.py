@@ -9,36 +9,44 @@ WEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
 FORECAST_URL = "https://api.openweathermap.org/data/2.5/forecast"
 
 def _map_weather(main: str, clouds: Optional[int], weather_id: Optional[int]) -> str:
-    """Map OpenWeather conditions to simple categories for Sekai robot"""
+    """Map OpenWeather conditions to 4 simple categories that match available images"""
     main_lower = (main or "").lower()
     
     # Check weather ID for more accurate classification
     if weather_id is not None:
+        # Weather conditions that map to thunderstorm_weather.png
         if 200 <= weather_id < 600:  # Thunderstorm, drizzle, rain
-            return "rainstorm"
+            return "thunderstorm"  # Changed from "rainstorm" to match image filename
+        
+        # Snow conditions - map to cloudy (since no snow image)
         if 600 <= weather_id < 700:  # Snow
-            return "snow"
+            return "cloudy"  # Map snow to cloudy since no snow image available
     
-    # Check main weather description
+    # Check main weather description and map to available images
     if "clear" in main_lower:
-        return "sunny"
+        return "sunny"  # Maps to sunny_weather.png
     
     if "cloud" in main_lower:
         if clouds is None:
-            return "cloudy"
+            return "cloudy"  # Maps to cloudy_weather.png
         if clouds <= 25:
-            return "sunny"
+            return "sunny"  # Maps to sunny_weather.png
         if 25 < clouds <= 70:
-            return "partly cloudy"
-        return "cloudy"
+            return "partly cloudy"  # Maps to partly_cloudy_weather.png
+        return "cloudy"  # Maps to cloudy_weather.png
     
-    if "rain" in main_lower or "drizzle" in main_lower or "thunderstorm" in main_lower:
-        return "rainstorm"
+    # Map rain conditions to thunderstorm (since no separate rain image)
+    if ("rain" in main_lower or "drizzle" in main_lower or "thunderstorm" in main_lower or
+        "storm" in main_lower or "shower" in main_lower):
+        return "thunderstorm"  # Maps to thunderstorm_weather.png
     
-    if "mist" in main_lower or "fog" in main_lower or "haze" in main_lower:
-        return "fog"
+    # Map fog/mist/haze to cloudy (since no fog image)
+    if ("mist" in main_lower or "fog" in main_lower or "haze" in main_lower or 
+        "smoke" in main_lower or "dust" in main_lower or "sand" in main_lower):
+        return "cloudy"  # Maps to cloudy_weather.png
     
-    return main_lower or "unknown"
+    # Default to cloudy for any unknown conditions
+    return "cloudy"  # Maps to cloudy_weather.png
 
 def _ts_to_local_day(ts: int) -> str:
     """Convert Unix timestamp to day name (e.g., Monday, Tuesday)"""
@@ -65,7 +73,7 @@ def get_weather_for_city_json(city: str,
     """
     # Get API key from environment if not provided
     if api_key is None:
-        api_key = os.getenv("OPENWEATHER_API_KEY")
+        api_key = "8c761d9643e00dc1bedca79e5811e1d3"
     if not api_key:
         raise ValueError("Missing OpenWeather API key. Set OPENWEATHER_API_KEY environment variable or pass api_key parameter.")
 
@@ -105,7 +113,7 @@ def get_weather_for_city_json(city: str,
             current_data.get("clouds", {}).get("all"),
             cur_weather.get("id")
         ),
-        "temp": current_data.get("main", {}).get("temp"),
+        "temp": round(current_data.get("main", {}).get("temp", 0)),  # Round to whole number
         "feels_like": current_data.get("main", {}).get("feels_like"),
         "humidity": current_data.get("main", {}).get("humidity"),
         "wind_speed": current_data.get("wind", {}).get("speed"),
@@ -146,9 +154,10 @@ def get_weather_for_city_json(city: str,
                     item.get("clouds", {}).get("all"),
                     w.get("id")
                 ),
-                "temp_day": item.get("main", {}).get("temp"),
-                "temp_min": item.get("main", {}).get("temp_min"),
-                "temp_max": item.get("main", {}).get("temp_max"),
+                "temp_day": round(item.get("main", {}).get("temp", 0)),  # Round to whole number
+                "temp": round(item.get("main", {}).get("temp", 0)),  # Added for compatibility
+                "temp_min": round(item.get("main", {}).get("temp_min", 0)),
+                "temp_max": round(item.get("main", {}).get("temp_max", 0)),
                 "pop": item.get("pop", 0),  # Probability of precipitation
             }
     
