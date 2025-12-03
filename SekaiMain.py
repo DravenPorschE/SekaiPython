@@ -13,6 +13,7 @@ import random
 import os
 from datetime import datetime, timedelta, date
 from weather import get_weather_for_city_json
+from sekai_wakeword_detection import SekaiWakeWordDetector
 
 today = date.today()
 year = today.year
@@ -38,12 +39,21 @@ ads = ADS.ADS1115(i2c)
 # ----------------------------
 # FSR on channel 0 (A0)
 # ----------------------------
-chan = AnalogIn(ads, 0)
+fsr_channel = AnalogIn(ads, 0)  # Renamed from 'chan' to 'fsr_channel' for clarity
 
 # ----------------------------
-# Threshold to detect touch
+# FSR Thresholds
 # ----------------------------
-THRESHOLD = 100
+FSR_THRESHOLD = 100  # Minimum value to detect touch
+FSR_DOUBLE_TAP_TIMEOUT = 0.5  # Seconds between taps for double tap
+FSR_COOLDOWN = 2.0  # Seconds before accepting new touch
+
+# FSR state tracking
+fsr_last_tap_time = 0
+fsr_tap_count = 0
+fsr_last_state = False
+fsr_cooldown_until = 0
+fsr_is_active = False
 
 calendar.setfirstweekday(calendar.SUNDAY)
 
@@ -93,6 +103,12 @@ sleep_timer_id = None
 last_interaction_time = time.time()
 idle_timer_start = None
 is_idle = False
+
+# Add after GPIO setup in your main script
+ACCESS_KEY = "VM996Z/2j8ghpUlIqlqxMmVAOxOHHCMujdWtGLAZ3i43Q0vTinykmg=="
+PPN_FILE = "hello-sec-ai_en_raspberry-pi_v3_0_0.ppn"
+
+wake_detector = SekaiWakeWordDetector(access_key=ACCESS_KEY, ppn_file_path=PPN_FILE)
 
 def load_image(image_name):
     """Load JPG image from sekai_faces folder and resize to fit screen"""
@@ -166,6 +182,86 @@ def load_image(image_name):
         import traceback
         traceback.print_exc()
         return None
+
+def activate_sekai(mode="touch", emotion=None):
+    """
+    Activate Sekai robot with specified emotion
+    mode: "touch" (FSR), "voice" (wake word), or "manual"
+    emotion: "happy", "angry", or None for random
+    """
+    global fsr_is_active, current_view
+    
+    print(f"\n{'🎯'*20}")
+    print(f"🎯 SEKAI ACTIVATED via {mode.upper()}")
+    print(f"{'🎯'*20}\n")
+    
+    # Determine emotion
+    if emotion is None:
+        if mode == "voice":
+            # Wake word usually makes her happy
+            emotion = "happy"
+        else:
+            # For touch, 70% happy, 30% angry
+            emotion = random.choices(["happy", "angry"], weights=[7, 3])[0]
+    
+    # Switch to face view if not already
+    if current_view != "face":
+        root.after(0, show_sekai_face)
+    else:
+        # If already in face view, reset idle timer
+        reset_idle_timer()
+    
+    # Set the mood
+    root.after(100, lambda e=emotion: set_mood(e))
+    
+    # Turn on LED
+    GPIO.output(LED_PIN, GPIO.HIGH)
+    
+    # Play appropriate audio
+    audio_folder = "voices_happy" if emotion == "happy" else "voices_angry"
+    
+    try:
+        files = os.listdir(audio_folder)
+        if files:
+            audio_file = os.path.join(audio_folder, random.choice(files))
+            print(f"Playing: {audio_file}")
+            
+            # Play in background thread to avoid blocking
+            def play_audio():
+                os.system(f"aplay {audio_file} 2>/dev/null")
+            
+            audio_thread = threading.Thread(target=play_audio, daemon=True)
+            audio_thread.start()
+        else:
+            print(f"No audio files found in {audio_folder}")
+    except Exception as e:
+        print(f"Audio error: {e}")
+    
+    # Set active state
+    fsr_is_active = True
+    
+    # Schedule deactivation
+    root.after(5000, deactivate_sekai)
+
+def deactivate_sekai():
+    """Deactivate Sekai robot"""
+    global fsr_is_active
+    
+    fsr_is_active = False
+    GPIO.output(LED_PIN, GPIO.LOW)
+    print("Sekai deactivated")
+    
+    # Reset to happy face after cooldown
+    root.after(1000, lambda: set_mood("happy"))
+
+# Set callback for wake word detection
+def on_wake_detected():
+    """Called when wake word is detected"""
+    # Activate via voice mode
+    activate_sekai(mode="voice", emotion="happy")
+
+wake_detector.on_wake_callback = on_wake_detected
+wake_detector.start()
 
 def set_mood(mood):
     """Set Sekai's mood and display the appropriate JPG image"""
@@ -560,81 +656,115 @@ def switch_view(event):
         cleanup_and_quit()
 
 def cleanup_and_quit():
-    """Clean up GPIO and close the application"""
+    if 'wake_detector' in globals():
+        wake_detector.stop()
     GPIO.cleanup()
     root.destroy()
 
 # Bind keys
 root.bind('<Key>', switch_view)
 
-# FSR monitoring function
+# Enhanced FSR monitoring function
 def monitor_fsr():
-    global timesClicked, isClicking
+    """Monitor FSR sensor for touch interactions"""
+    global fsr_last_tap_time, fsr_tap_count, fsr_last_state, fsr_cooldown_until, fsr_is_active
     
     while True:
         try:
-            fsr_value = chan.value
-
-            if fsr_value > THRESHOLD and not isClicking:
-                isClicking = True
-                timesClicked += 1
+            current_time = time.time()
+            fsr_value = fsr_channel.value
+            
+            # Check if we're in cooldown period
+            if current_time < fsr_cooldown_until:
+                fsr_last_state = False
+                time.sleep(0.05)
+                continue
+            
+            # Check if FSR is being pressed
+            fsr_pressed = fsr_value > FSR_THRESHOLD
+            
+            # Detect press start (rising edge)
+            if fsr_pressed and not fsr_last_state:
+                print(f"FSR pressed: {fsr_value}")
+                fsr_last_state = True
                 
-                if timesClicked == 2:
-                    print("Sekai is awake, say a command")
-
-                    # Determine emotion (90% happy, 10% angry)
-                    emotion = random.choices(
-                        ["happy", "angry"],
-                        weights=[7, 3]
-                    )[0]
-
-                    # Switch to face view first
-                    if current_view != "face":
-                        root.after(0, show_sekai_face)
-                    else:
-                        # If already in face view, reset idle timer
-                        reset_idle_timer()
+                # Check for double tap
+                time_since_last_tap = current_time - fsr_last_tap_time
+                
+                if time_since_last_tap < FSR_DOUBLE_TAP_TIMEOUT:
+                    fsr_tap_count += 1
+                    print(f"Double tap detected! Count: {fsr_tap_count}")
                     
-                    # Set the mood based on emotion
-                    root.after(100, lambda e=emotion: set_mood(e))
-                    
-                    # Turn on LED
-                    GPIO.output(LED_PIN, GPIO.HIGH)
-                    timesClicked = 0
-
-                    if emotion == "happy":
-                        audio_folder = "voices_happy"
-                        print("Sekai is happy!")
-                    else:
-                        audio_folder = "voices_angry"
-                        print("Sekai is angry!")
-
-                    # Pick a random file inside that folder
-                    files = os.listdir(audio_folder)
-                    if files:
-                        audioToPlay = os.path.join(audio_folder, random.choice(files))
-                        # Play through USB headphones
-                        os.system(f"aplay -D plughw:1,0 {audioToPlay}")
-                    else:
-                        print(f"No audio files found in {audio_folder}")
-                    
-                    # Wait 5 seconds then turn off LED
-                    time.sleep(5)
-                    GPIO.output(LED_PIN, GPIO.LOW)
-                    print("Sekai stopped listening")
-                    isClicking = False
-            else:
-                isClicking = False
-                GPIO.output(LED_PIN, GPIO.LOW)
-
-            time.sleep(0.1)
+                    # Double tap activates Sekai
+                    if fsr_tap_count >= 2 and not fsr_is_active:
+                        # Schedule activation in main thread
+                        root.after(0, lambda: activate_sekai(mode="touch"))
+                        fsr_tap_count = 0
+                        fsr_cooldown_until = current_time + FSR_COOLDOWN
+                else:
+                    # First tap
+                    fsr_tap_count = 1
+                    print("First tap detected")
+                
+                fsr_last_tap_time = current_time
+            
+            # Detect release (falling edge)
+            elif not fsr_pressed and fsr_last_state:
+                fsr_last_state = False
+                print("FSR released")
+            
+            # Reset tap count if too much time has passed
+            if current_time - fsr_last_tap_time > FSR_DOUBLE_TAP_TIMEOUT * 2:
+                if fsr_tap_count > 0:
+                    print(f"Tap timeout - resetting (had {fsr_tap_count} taps)")
+                    fsr_tap_count = 0
+            
+            # Show FSR value for debugging (optional)
+            # print(f"FSR: {fsr_value:5d} | State: {fsr_last_state} | Taps: {fsr_tap_count}")
+            
+            time.sleep(0.05)  # 50ms sampling rate
             
         except Exception as e:
-            print(f"FSR Error: {e}")
+            print(f"FSR monitoring error: {e}")
+            time.sleep(0.1)
+
+# Alternative: Simple FSR monitoring (if double tap doesn't work well)
+def monitor_fsr_simple():
+    """Simple FSR monitoring - single press activates"""
+    global fsr_is_active, fsr_cooldown_until
+    
+    while True:
+        try:
+            current_time = time.time()
+            fsr_value = fsr_channel.value
+            
+            # Check cooldown
+            if current_time < fsr_cooldown_until or fsr_is_active:
+                time.sleep(0.1)
+                continue
+            
+            # Check for press
+            if fsr_value > FSR_THRESHOLD:
+                print(f"FSR activated: {fsr_value}")
+                
+                # Schedule activation
+                root.after(0, lambda: activate_sekai(mode="touch"))
+                
+                # Set cooldown
+                fsr_cooldown_until = current_time + FSR_COOLDOWN
+                
+                # Wait for release
+                while fsr_channel.value > FSR_THRESHOLD / 2:
+                    time.sleep(0.05)
+            
+            time.sleep(0.05)
+            
+        except Exception as e:
+            print(f"FSR simple error: {e}")
             time.sleep(0.1)
 
 # Start FSR monitoring in separate thread
-fsr_thread = threading.Thread(target=monitor_fsr, daemon=True)
+fsr_thread = threading.Thread(target=monitor_fsr_simple, daemon=True)
 fsr_thread.start()
 
 # Handle window close
