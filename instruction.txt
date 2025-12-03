@@ -1,0 +1,93 @@
+How to Use This Test Script:
+1. Save the script as sekai_voice_test.py
+2. Run the test:
+bash
+# First, check if microphone is detected
+python3 sekai_voice_test.py --mic-check
+
+# If microphone is found, run the full test
+python3 sekai_voice_test.py
+3. What to expect:
+When you run the test:
+
+It will check for your Picovoice AccessKey
+
+It will look for the .ppn file (if you've downloaded it)
+
+It will list available microphones
+
+It will start listening for 60 seconds
+
+Every time it hears "hello sekai" (or "computer" if using fallback), it will print:
+
+text
+============================================================
+✅✅✅ WAKE WORD DETECTED! ✅✅✅
+   You said: 'hello sekai'
+   Microphone is working correctly!
+============================================================
+4. Testing steps:
+Step 1 - Basic mic check:
+
+bash
+# Check if system sees your microphone
+arecord -l
+
+# Test recording
+arecord --duration=5 test.wav
+aplay test.wav
+Step 2 - Run the test script:
+
+bash
+# Set your Picovoice key (or enter when prompted)
+export PICOVOICE_ACCESS_KEY="your-key-here"
+
+# Run the test
+python3 sekai_voice_test.py
+Step 3 - Speak clearly:
+
+Say "hello sekai" in a normal voice
+
+Wait for the detection message
+
+Try from different distances (1-2 meters)
+
+Test with background noise
+
+5. Troubleshooting:
+If no detection:
+
+Increase sensitivity: Change sensitivities=[0.7] to sensitivities=[0.8] or [0.9]
+
+Check microphone: Run python3 sekai_voice_test.py --mic-check
+
+Try built-in wake word: The script will fall back to "computer" if no .ppn file
+
+Speak louder/closer: Raspberry Pi mics aren't very sensitive
+
+If false detections:
+
+Decrease sensitivity: Change to sensitivities=[0.5] or [0.6]
+
+Reduce background noise
+
+Use a USB microphone instead of built-in
+
+6. Success indicators:
+✅ You see "WAKE WORD DETECTED!" when you say "hello sekai"
+
+✅ No false detections when you're not speaking
+
+✅ Detection happens within 1 second of speaking
+
+✅ Works from 1-2 meters away
+
+Once this test works reliably, you can integrate it with your main script by:
+
+Removing test_mode=True
+
+Connecting the callbacks (on_wake_callback and on_command_callback)
+
+Running it in a background thread
+
+This test script will give you immediate feedback on whether your microphone setup is working correctly with Picovoice!
