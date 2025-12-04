@@ -22,8 +22,9 @@ from typecast_api import text_to_speech_api
 from ai_talk import getSekaiResponse
 from get_intent import getSekaiIntent
 import json
-
-import time
+import queue
+import pyaudio
+import numpy as np
 
 today = date.today()
 year = today.year
@@ -113,6 +114,9 @@ sleep_timer_id = None
 last_interaction_time = time.time()
 idle_timer_start = None
 is_idle = False
+
+# Queue for wake word detections
+wake_word_queue = queue.Queue()
 
 # Create Vosk-based wake word detector (listens for "hey girl")
 wake_detector = SekaiDetector()
@@ -331,7 +335,22 @@ def deactivate_sekai():
 def on_wake_detected():
     """Called when wake word 'hey girl' is detected"""
     print("🔊 Wake word 'hey girl' detected! Activating Sekai...")
-    activate_sekai(mode="voice", emotion="happy")
+    # Put detection in queue for main thread to process
+    wake_word_queue.put(True)
+
+def process_wake_word_queue():
+    """Process wake word detections from queue in main thread"""
+    try:
+        while True:
+            # Non-blocking check of queue
+            wake_word_queue.get_nowait()
+            print("🔊 Processing wake word detection from queue...")
+            activate_sekai(mode="voice", emotion="happy")
+    except queue.Empty:
+        pass
+    
+    # Check again in 100ms
+    root.after(100, process_wake_word_queue)
 
 # 3. Monkey-patch the SekaiDetector class to add missing methods
 def patched_on_hey_girl_detected(self):
@@ -348,24 +367,34 @@ def patched_on_hey_girl_detected(self):
 # Replace the method in the class
 SekaiDetector.on_hey_girl_detected = patched_on_hey_girl_detected
 
-# 4. Add start() method to the class
-# 4. Add start() method to the class
+# 4. Add MODIFIED start() method to the class - non-blocking version
 def start_detector(self, device_index=None):
     """Start listening in background thread"""
     import threading
-    print("🚀 Starting wake word detector in background...")
     
-    # If no device specified, use default (0)
-    if device_index is None:
-        device_index = 2
+    def detector_worker():
+        """Worker thread that runs the detector"""
+        print(f"🚀 Starting wake word detector on device {device_index}...")
+        try:
+            # Set the callback on the instance
+            self._wake_callback = on_wake_detected
+            
+            # Start listening (this will block, so it runs in its own thread)
+            self.start_listening(device_index)
+        except Exception as e:
+            print(f"❌ Error in wake detector: {e}")
+            import traceback
+            traceback.print_exc()
     
-    self.listening_thread = threading.Thread(
-        target=self.start_listening,
-        args=(device_index,),  # Pass the device index
-        daemon=True
+    # Start the detector in a daemon thread
+    self.detector_thread = threading.Thread(
+        target=detector_worker,
+        daemon=True,
+        name="WakeWordDetector"
     )
-    self.listening_thread.start()
-    print(f"✅ Wake word detector started on device {device_index}")
+    self.detector_thread.start()
+    
+    print(f"✅ Wake word detector thread started on device {device_index}")
 
 SekaiDetector.start = start_detector
 
@@ -373,13 +402,17 @@ SekaiDetector.start = start_detector
 def stop_detector(self):
     """Stop listening"""
     print("🛑 Stopping wake word detector...")
+    # Add any cleanup needed for your detector
 
 SekaiDetector.stop = stop_detector
 
 # 6. Set the callback on the INSTANCE (not the class)
 wake_detector._wake_callback = on_wake_detected
 
-# 7. Start the detector
+# 7. Start the queue processor BEFORE starting detector
+root.after(1000, process_wake_word_queue)  # Start after 1 second
+
+# 8. Start the detector
 wake_detector.start()
 
 def set_mood(mood):
@@ -854,12 +887,38 @@ fsr_thread.start()
 # Handle window close
 root.protocol("WM_DELETE_WINDOW", cleanup_and_quit)
 
+def check_audio_devices():
+    """List available audio devices for debugging"""
+    try:
+        p = pyaudio.PyAudio()
+        print("\n" + "="*50)
+        print("Available Audio Devices:")
+        print("="*50)
+        for i in range(p.get_device_count()):
+            dev = p.get_device_info_by_index(i)
+            if dev['maxInputChannels'] > 0:
+                print(f"{i}: {dev['name']} - {dev['maxInputChannels']} input channels")
+        print("="*50 + "\n")
+        p.terminate()
+    except:
+        print("Could not list audio devices")
+
 try:
+    # Check audio devices for debugging
+    check_audio_devices()
+    
     # Check image files at startup
     check_available_images()
 
     # Start with face view
     show_sekai_face()
+    
+    # Start the main loop
+    print("\n" + "="*50)
+    print("Starting Sekai Robot Interface")
+    print("Main loop starting...")
+    print("="*50 + "\n")
+    
     root.mainloop()
 except KeyboardInterrupt:
     cleanup_and_quit()
