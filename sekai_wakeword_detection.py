@@ -295,12 +295,12 @@ class SekaiDetector:
         
         # Open audio stream
         stream = pa.open(
-            rate=16000,
-            channels=1,  # Mono uses less CPU
+            rate=48000,
+            channels=2,  # Mono uses less CPU
             format=pyaudio.paInt16,
             input=True,
             frames_per_buffer=2048,
-            input_device_index=device_index
+            input_device_index=1
         )
         
         print(f"\n{'='*60}")
