@@ -10,6 +10,8 @@ import RPi.GPIO as GPIO
 import threading
 import os
 import queue
+import subprocess
+import pyaudio
 
 # ============================================================================
 # GLOBAL VARIABLES AND SHARED STATE
@@ -57,11 +59,102 @@ ui_command_queue = queue.Queue()
 
 # Thread control flags
 fsr_thread_running = True
-wake_detector_running = True
 
 # Tkinter references
 root = None
 frames = None
+
+# Audio device - using your discovered device
+AUDIO_DEVICE = "plughw:2,0"  # Your working audio device
+audio_device_found = True
+audio_device_name = AUDIO_DEVICE
+
+# ============================================================================
+# AUDIO DEVICE DETECTION
+# ============================================================================
+def check_audio_devices():
+    """Check available audio devices"""
+    global audio_device_found, audio_device_name
+    
+    print("\n" + "="*60)
+    print("[Audio] AUDIO DEVICE CONFIGURATION")
+    print("="*60)
+    
+    print(f"[Audio] Using specified device: {AUDIO_DEVICE}")
+    
+    # Test the device
+    print(f"[Audio] Testing device: {AUDIO_DEVICE}")
+    
+    # Create a simple test recording
+    test_file = "/tmp/audio_test.wav"
+    test_command = f"arecord -d 2 -f S16_LE -r 16000 -c 1 -D {AUDIO_DEVICE} {test_file}"
+    
+    print(f"[Audio] Test command: {test_command}")
+    
+    try:
+        # Try to record for 2 seconds
+        print("[Audio] Starting 2-second test recording...")
+        result = subprocess.run(test_command, shell=True, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            print("[Audio] ✅ Test recording successful!")
+            
+            # Check if file was created
+            if os.path.exists(test_file):
+                file_size = os.path.getsize(test_file)
+                print(f"[Audio] Test file created: {test_file} ({file_size} bytes)")
+                
+                # Try to play it back
+                print("[Audio] Playing back test recording...")
+                play_result = subprocess.run(f"aplay {test_file}", shell=True, capture_output=True, text=True)
+                if play_result.returncode == 0:
+                    print("[Audio] ✅ Playback successful!")
+                else:
+                    print(f"[Audio] Playback failed: {play_result.stderr[:100]}")
+            else:
+                print("[Audio] ⚠️ Test file not created")
+        else:
+            print(f"[Audio] ❌ Test recording failed: {result.stderr[:200]}")
+            
+            # Try alternative formats
+            print("[Audio] Trying alternative audio formats...")
+            formats = ['S16_LE', 'S32_LE', 'cd', 'dat']
+            rates = [16000, 44100, 48000]
+            
+            for fmt in formats:
+                for rate in rates:
+                    alt_command = f"arecord -d 1 -f {fmt} -r {rate} -c 1 -D {AUDIO_DEVICE} /tmp/test_{fmt}_{rate}.wav 2>&1"
+                    alt_result = subprocess.run(alt_command, shell=True, capture_output=True, text=True)
+                    if alt_result.returncode == 0:
+                        print(f"[Audio] ✅ Alternative works: format={fmt}, rate={rate}")
+                        break
+                else:
+                    continue
+                break
+            
+            audio_device_found = False
+            
+    except Exception as e:
+        print(f"[Audio] Error testing device: {e}")
+        audio_device_found = False
+    
+    # List all available devices for debugging
+    print("\n[Audio] Listing all available audio devices:")
+    try:
+        # List with arecord -L
+        list_result = subprocess.run(['arecord', '-L'], capture_output=True, text=True)
+        if list_result.returncode == 0:
+            lines = list_result.stdout.split('\n')
+            for i, line in enumerate(lines[:20]):  # Show first 20 lines
+                print(f"  {line}")
+            if len(lines) > 20:
+                print(f"  ... and {len(lines)-20} more lines")
+    except Exception as e:
+        print(f"[Audio] Error listing devices: {e}")
+    
+    print("="*60 + "\n")
+    
+    return audio_device_found
 
 # ============================================================================
 # TKINTER UI SETUP (Main Thread)
@@ -80,43 +173,62 @@ def setup_tkinter_ui():
     screen_height = 320
     root.geometry(f"{screen_width}x{screen_height}")
     root.resizable(False, False)
-    root.configure(bg="green")  # Start with green background
+    
+    if audio_device_found:
+        root.configure(bg="green")  # Green = ready
+    else:
+        root.configure(bg="orange")  # Orange = no audio device
     
     # GRID SETUP
     root.rowconfigure(0, weight=1)
     root.columnconfigure(0, weight=1)
     
     # Container for all views
-    container = tk.Frame(root, bg="green")
+    container = tk.Frame(root, bg=root.cget('bg'))
     container.grid(row=0, column=0, sticky="nsew")
     container.rowconfigure(0, weight=1)
     container.columnconfigure(0, weight=1)
     
     # Create a simple UI
+    device_status = "✅ Audio: READY" if audio_device_found else "❌ Audio: DEVICE ERROR"
+    
     test_label = tk.Label(
         container, 
         text="Touch FSR to start recording test\n(Will record for 5 seconds then exit)",
-        bg="green",
+        bg=root.cget('bg'),
         fg="white",
-        font=("Arial", 16, "bold")
+        font=("Arial", 16, "bold"),
+        wraplength=400
     )
     test_label.grid(row=0, column=0, sticky="nsew")
     
     status_label = tk.Label(
         container,
-        text="Status: Waiting for FSR touch...",
-        bg="green",
+        text=f"Status: {device_status}\nDouble-tap FSR to begin",
+        bg=root.cget('bg'),
         fg="white",
-        font=("Arial", 14)
+        font=("Arial", 14),
+        wraplength=400
     )
     status_label.grid(row=1, column=0, sticky="nsew", pady=20)
+    
+    device_label = tk.Label(
+        container,
+        text=f"Device: {audio_device_name}",
+        bg=root.cget('bg'),
+        fg="yellow" if audio_device_found else "red",
+        font=("Arial", 12),
+        wraplength=400
+    )
+    device_label.grid(row=2, column=0, sticky="nsew")
     
     # Store frames for later access
     frames = {
         'container': container,
         'root': root,
         'test_label': test_label,
-        'status_label': status_label
+        'status_label': status_label,
+        'device_label': device_label
     }
     
     # Start UI command processor
@@ -124,7 +236,7 @@ def setup_tkinter_ui():
     
     return frames
 
-def change_background_color(color, text="", status=""):
+def change_background_color(color, text="", status="", device_text=""):
     """Change background color and update text"""
     global frames
     
@@ -133,11 +245,15 @@ def change_background_color(color, text="", status=""):
         frames['container'].configure(bg=color)
         frames['test_label'].configure(bg=color)
         frames['status_label'].configure(bg=color)
+        frames['device_label'].configure(bg=color)
         
         if text:
             frames['test_label'].config(text=text)
         if status:
             frames['status_label'].config(text=status)
+        if device_text:
+            frames['device_label'].config(text=device_text)
+            frames['device_label'].config(fg="yellow")
 
 # ============================================================================
 # THREAD 1: FSR MONITORING (Separate Thread)
@@ -218,13 +334,14 @@ def fsr_monitoring_thread():
 # AUDIO RECORDING FUNCTIONS
 # ============================================================================
 def record_audio():
-    """Record audio for 5 seconds"""
-    print("\n" + "="*50)
-    print("STARTING 5-SECOND AUDIO RECORDING TEST")
-    print("="*50 + "\n")
+    """Record audio for 5 seconds using the specified device"""
+    print("\n" + "="*60)
+    print("STARTING 5-SECOND AUDIO RECORDING")
+    print(f"Using device: {AUDIO_DEVICE}")
+    print("="*60 + "\n")
     
     # Update UI to show recording
-    ui_command_queue.put(('change_color', 'red', 'Recording... Press and hold FSR', 'Status: Recording audio for 5 seconds...'))
+    ui_command_queue.put(('change_color', 'red', '🎤 RECORDING...', 'Status: Recording audio for 5 seconds...'))
     
     # Turn on LED
     GPIO.output(LED_PIN, GPIO.HIGH)
@@ -233,47 +350,77 @@ def record_audio():
     recording_file = "test_recording.wav"
     print(f"[Recording] Saving to: {recording_file}")
     
-    # Using arecord with parameters suitable for audio
-    arecord_command = f"arecord -d 5 -f S16_LE -t wav -r 16000 -c 1 {recording_file}"
-    print(f"[Recording] Command: {arecord_command}")
+    # Use your working device parameter
+    record_command = f"arecord -d 5 -f S16_LE -r 16000 -c 1 -D {AUDIO_DEVICE} {recording_file}"
+    print(f"[Recording] Command: {record_command}")
     
     # Start recording
     start_time = time.time()
-    return_code = os.system(arecord_command)
-    end_time = time.time()
+    print(f"[Recording] Starting at: {time.strftime('%H:%M:%S')}")
+    
+    # Run the recording command
+    try:
+        result = subprocess.run(record_command, shell=True, capture_output=True, text=True)
+        end_time = time.time()
+        
+        recording_time = end_time - start_time
+        print(f"[Recording] Recording finished at: {time.strftime('%H:%M:%S')}")
+        print(f"[Recording] Duration: {recording_time:.2f} seconds")
+        
+        if result.returncode == 0:
+            print("[Recording] ✅ Recording command successful!")
+            
+            # Check if file was created
+            if os.path.exists(recording_file):
+                file_size = os.path.getsize(recording_file)
+                print(f"[Recording] 📁 File created: {recording_file}")
+                print(f"[Recording] 📏 File size: {file_size} bytes ({file_size/1024:.1f} KB)")
+                
+                # Update UI
+                ui_command_queue.put(('change_color', 'blue', '✅ Recording Complete!', 
+                                      f'Status: Recorded {file_size} bytes\nPlaying back...'))
+                
+                # Play back the recording to verify
+                print("[Recording] Playing back recording...")
+                play_command = f"aplay {recording_file}"
+                print(f"[Recording] Play command: {play_command}")
+                
+                play_result = subprocess.run(play_command, shell=True, capture_output=True, text=True)
+                if play_result.returncode == 0:
+                    print("[Recording] ✅ Playback successful!")
+                    ui_command_queue.put(('change_color', 'green', '🎵 Playback Complete!', 
+                                          'Status: Recording and playback successful!'))
+                else:
+                    print(f"[Recording] ❌ Playback failed: {play_result.stderr[:200]}")
+                    ui_command_queue.put(('change_color', 'orange', '⚠️ Playback Failed', 
+                                          f'Status: {play_result.stderr[:100]}'))
+            else:
+                print(f"[Recording] ❌ File not created: {recording_file}")
+                ui_command_queue.put(('change_color', 'orange', '❌ Recording Failed', 
+                                      'Status: File not created'))
+        else:
+            print(f"[Recording] ❌ Recording command failed!")
+            print(f"[Recording] Error code: {result.returncode}")
+            print(f"[Recording] stderr: {result.stderr[:500]}")
+            ui_command_queue.put(('change_color', 'orange', '❌ Recording Failed', 
+                                  f'Status: {result.stderr[:100]}'))
+            
+    except Exception as e:
+        print(f"[Recording] ❌ Exception during recording: {e}")
+        import traceback
+        traceback.print_exc()
+        ui_command_queue.put(('change_color', 'orange', '❌ Recording Exception', 
+                              f'Status: {str(e)[:100]}'))
     
     # Turn off LED
     GPIO.output(LED_PIN, GPIO.LOW)
     
-    if return_code == 0:
-        recording_time = end_time - start_time
-        print(f"[Recording] ✅ Recording finished in {recording_time:.2f} seconds")
-        
-        if os.path.exists(recording_file):
-            file_size = os.path.getsize(recording_file)
-            print(f"[Recording] 📁 File size: {file_size} bytes ({file_size/1024:.1f} KB)")
-            
-            # Play back the recording to verify
-            print("[Recording] Playing back recording...")
-            os.system(f"aplay {recording_file} 2>/dev/null")
-            
-            # Update UI
-            ui_command_queue.put(('change_color', 'blue', 'Recording complete!', 
-                                  f'Status: Recorded {file_size} bytes, playing back...'))
-            time.sleep(3)  # Wait for playback to finish
-            
-        else:
-            print(f"[Recording] ⚠️ File created but not found: {recording_file}")
-            ui_command_queue.put(('change_color', 'orange', 'Recording error', 'Status: File not found'))
-    else:
-        print(f"[Recording] ❌ Recording failed with code: {return_code}")
-        ui_command_queue.put(('change_color', 'orange', 'Recording failed', f'Status: Error code {return_code}'))
+    print("\n" + "="*60)
+    print("RECORDING TEST COMPLETE")
+    print("="*60 + "\n")
     
-    print("\n" + "="*50)
-    print("RECORDING TEST COMPLETE - EXITING APP")
-    print("="*50 + "\n")
-    
-    # Exit the app
+    # Wait a moment then exit
+    time.sleep(2)
     ui_command_queue.put(('exit_app',))
 
 # ============================================================================
@@ -292,7 +439,8 @@ def process_ui_commands():
                 color = command[1]
                 text = command[2] if len(command) > 2 else ""
                 status = command[3] if len(command) > 3 else ""
-                change_background_color(color, text, status)
+                device_text = command[4] if len(command) > 4 else ""
+                change_background_color(color, text, status, device_text)
                 
             elif command[0] == 'exit_app':
                 print("[UI Thread] Exiting application...")
@@ -311,7 +459,7 @@ def process_ui_commands():
                 print("[UI Thread] FSR detected - stopping threads and starting recording")
                 
                 # Change UI to indicate detection
-                change_background_color('yellow', 'FSR Detected!', 'Status: Preparing to record...')
+                change_background_color('yellow', '✅ FSR Detected!', 'Status: Preparing to record...')
                 
                 # Schedule recording to start after a brief delay
                 root.after(1000, start_recording_sequence)
@@ -328,15 +476,16 @@ def start_recording_sequence():
     print("[UI Thread] Starting recording sequence...")
     
     # Update UI
-    change_background_color('orange', 'Starting recording in 3...', 'Status: Get ready to speak')
+    change_background_color('orange', 'Starting recording in 3...', 'Status: Get ready to speak...')
     
     # Countdown
     def countdown(remaining):
         if remaining > 0:
-            change_background_color('orange', f'Starting recording in {remaining}...', 'Status: Get ready to speak')
+            change_background_color('orange', f'Starting recording in {remaining}...', 'Status: Get ready to speak...')
             root.after(1000, lambda: countdown(remaining - 1))
         else:
             # Start recording in a separate thread to not block UI
+            change_background_color('red', '🎤 RECORDING NOW!', 'Status: Speak now! Recording...')
             recording_thread = threading.Thread(target=record_audio, daemon=True)
             recording_thread.start()
     
@@ -347,13 +496,12 @@ def start_recording_sequence():
 # ============================================================================
 def cleanup_and_exit():
     """Cleanup and exit the application"""
-    global fsr_thread_running, wake_detector_running, root
+    global fsr_thread_running, root
     
     print("\n[Cleanup] Cleaning up resources...")
     
     # Stop threads
     fsr_thread_running = False
-    wake_detector_running = False
     
     # Cleanup GPIO
     GPIO.cleanup()
@@ -373,16 +521,26 @@ def cleanup_and_exit():
 # ============================================================================
 def main():
     """Main function to start the test"""
-    print("="*60)
+    print("="*70)
     print("FSR TOUCH RECORDING TEST")
-    print("="*60)
-    print("Instructions:")
+    print("="*70)
+    print(f"Audio Device: {AUDIO_DEVICE}")
+    print("\nInstructions:")
     print("1. Double-tap the FSR sensor quickly")
     print("2. UI will change colors to indicate status")
     print("3. After 3-second countdown, 5-second recording starts")
     print("4. Recording will play back automatically")
     print("5. App will exit automatically")
-    print("="*60)
+    print("="*70)
+    
+    # Check audio devices
+    check_audio_devices()
+    
+    if not audio_device_found:
+        print("❌ Audio device test failed!")
+        print("Please check your audio configuration.")
+        print("Try running: arecord -L")
+        return
     
     # Setup Tkinter UI
     frames = setup_tkinter_ui()
