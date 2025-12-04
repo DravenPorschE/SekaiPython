@@ -13,6 +13,7 @@ import queue
 import subprocess
 from PIL import Image, ImageTk
 from datetime import datetime
+import random
 
 # ============================================================================
 # GLOBAL VARIABLES AND SHARED STATE
@@ -78,7 +79,7 @@ weather_frame = None
 face_label = None
 
 # Current state
-current_view = "face"
+current_view = "black"
 current_mood = "happy"
 current_photo = None
 
@@ -87,6 +88,9 @@ image_cache = {}
 
 # Audio device
 AUDIO_DEVICE = "plughw:2,0"
+
+# Mood probability (7 happy : 3 angry)
+MOOD_PROBABILITIES = {"happy": 0.7, "angry": 0.3}
 
 # ============================================================================
 # MODULAR VIEW FUNCTIONS
@@ -116,11 +120,17 @@ def show_calendar():
     
     return calendar_frame
 
-def show_face(mood="happy"):
-    """Show Sekai's face - press 'b'"""
+def show_face():
+    """Show Sekai's face with random mood (70% happy, 30% angry) - press 'b'"""
     global current_view, face_frame, current_mood
     
-    print(f"[UI] Showing Sekai face with mood: {mood}")
+    # Choose random mood based on probabilities
+    mood = random.choices(
+        list(MOOD_PROBABILITIES.keys()), 
+        weights=list(MOOD_PROBABILITIES.values())
+    )[0]
+    
+    print(f"[UI] Showing Sekai face with random mood: {mood} (70% happy, 30% angry)")
     
     if current_view == "face" and current_mood == mood:
         return face_frame
@@ -146,27 +156,16 @@ def show_face(mood="happy"):
     return face_frame
 
 def show_recording_face():
-    """Show recording face with LED indicator"""
+    """Show recording face with LED indicator - NO TEXT OVERLAY"""
     global current_view, face_frame
     
-    print("[UI] Showing recording face")
+    print("[UI] Showing recording face (no text)")
     
     if current_view != "face":
-        show_face("happy")  # Switch to face view first
+        show_face()  # Switch to face view first with random mood
     
-    # Update face to show recording indicator
-    if face_label and face_label.winfo_exists():
-        # Load angry face for recording
-        photo = load_face_image("angry")
-        if photo:
-            face_label.config(image=photo, bg="black")
-            face_label.image = photo
-            # Add recording text
-            face_label.config(text="🎤 RECORDING\nLED is flashing!", 
-                            compound="center",
-                            fg="white",
-                            font=("Arial", 24, "bold"),
-                            bg="black")
+    # Show angry face for recording (no text overlay)
+    set_face_mood("angry")
     
     update_title("Recording...")
 
@@ -469,7 +468,7 @@ def create_fallback_image(mood):
     return photo
 
 def set_face_mood(mood):
-    """Set Sekai's mood"""
+    """Set Sekai's mood - NO TEXT OVERLAY"""
     global current_mood, current_photo, face_label
     
     current_mood = mood
@@ -479,11 +478,11 @@ def set_face_mood(mood):
         photo = load_face_image(mood)
         
         if photo:
-            # Update the label with the image
+            # Update the label with the image - NO TEXT
             face_label.config(image=photo, bg="black")
             face_label.image = photo  # Keep a reference!
             current_photo = photo
-            # Clear any text overlay
+            # Clear any text overlay - just show the image
             face_label.config(text="", compound="center")
     
     return current_mood
@@ -498,7 +497,7 @@ def record_audio():
     print("STARTING 5-SECOND AUDIO RECORDING")
     print("="*50)
     
-    # Show recording face
+    # Show recording face (angry, no text)
     show_recording_face()
     
     # Start LED flashing in a separate thread
@@ -558,9 +557,9 @@ def record_audio():
     print("RECORDING COMPLETE")
     print("="*50 + "\n")
     
-    # Return to happy face after a delay
+    # Return to random face after a delay (70% happy, 30% angry)
     if root and root.winfo_exists():
-        root.after(1000, lambda: show_face("happy"))
+        root.after(1000, show_face)
 
 def flash_led_while_recording():
     """Flash LED while recording is in progress"""
@@ -672,8 +671,8 @@ def process_ui_commands():
             if event[0] == 'fsr_detected':
                 print("[UI Thread] FSR double-tap detected! Starting recording sequence...")
                 
-                # Show angry face immediately
-                show_face("angry")
+                # Show angry face immediately (for recording)
+                set_face_mood("angry")
                 
                 # Start recording after 3 seconds
                 if root and root.winfo_exists():
@@ -705,13 +704,13 @@ def setup_keyboard_controls():
         if key == 'a':
             show_calendar()
         elif key == 'b':
-            show_face("happy")
+            show_face()  # Random mood (70% happy, 30% angry)
         elif key == 'c':
             show_weather()
         elif key == 'r':
             # Manual recording test
             print("[Manual] Starting recording test...")
-            show_face("angry")
+            set_face_mood("angry")
             if root and root.winfo_exists():
                 root.after(1000, start_recording)
         elif key == 'q':
@@ -736,7 +735,7 @@ def setup_tkinter_ui():
     # Set fixed screen size
     root.geometry(f"{SCREEN_WIDTH}x{SCREEN_HEIGHT}")
     root.resizable(False, False)
-    root.configure(bg="black")
+    root.configure(bg="black")  # Start with black screen
     
     # GRID SETUP
     root.rowconfigure(0, weight=1)
@@ -748,8 +747,22 @@ def setup_tkinter_ui():
     container.rowconfigure(0, weight=1)
     container.columnconfigure(0, weight=1)
     
-    # Start with happy face
-    show_face("happy")
+    # Create all frames but don't show them yet
+    # They will be shown when buttons are pressed
+    global calendar_frame, face_frame, weather_frame, face_label
+    
+    # Create frames (hidden initially)
+    calendar_frame = create_calendar_view()
+    calendar_frame.grid(row=0, column=0, sticky="nsew")
+    calendar_frame.grid_remove()
+    
+    face_frame = create_face_view()
+    face_frame.grid(row=0, column=0, sticky="nsew")
+    face_frame.grid_remove()
+    
+    weather_frame = create_weather_view()
+    weather_frame.grid(row=0, column=0, sticky="nsew")
+    weather_frame.grid_remove()
     
     # Start UI command processor
     root.after(100, process_ui_commands)
@@ -793,21 +806,21 @@ def cleanup_and_exit():
 def main():
     """Main function"""
     print("="*60)
-    print("SEKAI INTERFACE - COMPLETE VERSION")
+    print("SEKAI INTERFACE - UPDATED VERSION")
     print("="*60)
     print("\nKEYBOARD SHORTCUTS:")
     print("  a = Show Calendar")
-    print("  b = Show Happy Face")
+    print("  b = Show Random Face (70% happy, 30% angry)")
     print("  c = Show Weather")
     print("  r = Manual Recording Test")
     print("  q = Quit")
     print("\nFSR CONTROL:")
-    print("  Double-tap FSR = angry face → 3 sec → record → happy face")
-    print("\nRECORDING FEATURES:")
-    print("  • 5-second audio recording")
-    print("  • LED flashes while recording")
-    print("  • Audio playback after recording")
-    print("  • Uses device: plughw:2,0")
+    print("  Double-tap FSR = angry face → 3 sec → record → random face")
+    print("\nCHANGES MADE:")
+    print("  1. Starts with BLACK SCREEN")
+    print("  2. Press 'b' shows random face (70% happy, 30% angry)")
+    print("  3. No text overlay during recording")
+    print("  4. Views load when first accessed")
     print("="*60)
     
     # Check if image directory exists
@@ -828,7 +841,7 @@ def main():
     
     # Start main loop
     print("\n[Main] Starting Tkinter main loop...")
-    print("[Main] Press a/b/c/r or double-tap FSR\n")
+    print("[Main] Starts with BLACK SCREEN - Press a/b/c/r\n")
     
     try:
         root.mainloop()
