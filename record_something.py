@@ -145,6 +145,31 @@ def show_face(mood="happy"):
     
     return face_frame
 
+def show_recording_face():
+    """Show recording face with LED indicator"""
+    global current_view, face_frame
+    
+    print("[UI] Showing recording face")
+    
+    if current_view != "face":
+        show_face("happy")  # Switch to face view first
+    
+    # Update face to show recording indicator
+    if face_label and face_label.winfo_exists():
+        # Load angry face for recording
+        photo = load_face_image("angry")
+        if photo:
+            face_label.config(image=photo, bg="black")
+            face_label.image = photo
+            # Add recording text
+            face_label.config(text="🎤 RECORDING\nLED is flashing!", 
+                            compound="center",
+                            fg="white",
+                            font=("Arial", 24, "bold"),
+                            bg="black")
+    
+    update_title("Recording...")
+
 def show_weather():
     """Show weather view - press 'c'"""
     global current_view, weather_frame
@@ -458,8 +483,105 @@ def set_face_mood(mood):
             face_label.config(image=photo, bg="black")
             face_label.image = photo  # Keep a reference!
             current_photo = photo
+            # Clear any text overlay
+            face_label.config(text="", compound="center")
     
     return current_mood
+
+# ============================================================================
+# AUDIO RECORDING FUNCTIONS
+# ============================================================================
+
+def record_audio():
+    """Record audio for 5 seconds with flashing LED"""
+    print("\n" + "="*50)
+    print("STARTING 5-SECOND AUDIO RECORDING")
+    print("="*50)
+    
+    # Show recording face
+    show_recording_face()
+    
+    # Start LED flashing in a separate thread
+    flash_thread = threading.Thread(target=flash_led_while_recording, daemon=True)
+    flash_thread.start()
+    
+    # Record for 5 seconds
+    recording_file = "test_recording.wav"
+    print(f"[Recording] Saving to: {recording_file}")
+    
+    # Record command with your audio device
+    record_command = f"arecord -d 5 -f S16_LE -r 16000 -c 1 -D {AUDIO_DEVICE} {recording_file}"
+    print(f"[Recording] Command: {record_command}")
+    
+    # Start recording
+    start_time = time.time()
+    print(f"[Recording] Starting recording at: {time.strftime('%H:%M:%S')}")
+    
+    try:
+        # This runs in the recording thread, blocks for 5 seconds
+        result = subprocess.run(record_command, shell=True, capture_output=True, text=True)
+        end_time = time.time()
+        
+        recording_time = end_time - start_time
+        print(f"[Recording] Recording finished at: {time.strftime('%H:%M:%S')}")
+        print(f"[Recording] Duration: {recording_time:.2f} seconds")
+        
+        if result.returncode == 0:
+            print("[Recording] ✅ Recording successful!")
+            
+            if os.path.exists(recording_file):
+                file_size = os.path.getsize(recording_file)
+                print(f"[Recording] 📁 File size: {file_size} bytes")
+                
+                # Play back the recording
+                print("[Recording] Playing back recording...")
+                play_command = f"aplay {recording_file}"
+                play_result = subprocess.run(play_command, shell=True, capture_output=True, text=True)
+                
+                if play_result.returncode == 0:
+                    print("[Recording] ✅ Playback successful!")
+                else:
+                    print(f"[Recording] ❌ Playback failed: {play_result.stderr[:100]}")
+            else:
+                print(f"[Recording] ❌ File not created")
+        else:
+            print(f"[Recording] ❌ Recording failed!")
+            print(f"[Recording] Error: {result.stderr[:200]}")
+            
+    except Exception as e:
+        print(f"[Recording] ❌ Exception: {e}")
+    
+    # Stop LED flashing and turn off
+    GPIO.output(LED_PIN, GPIO.LOW)
+    
+    print("\n" + "="*50)
+    print("RECORDING COMPLETE")
+    print("="*50 + "\n")
+    
+    # Return to happy face after a delay
+    if root and root.winfo_exists():
+        root.after(1000, lambda: show_face("happy"))
+
+def flash_led_while_recording():
+    """Flash LED while recording is in progress"""
+    print("[LED] Starting LED flash pattern")
+    
+    try:
+        flash_duration = 5.0  # Match recording duration
+        start_time = time.time()
+        
+        while time.time() - start_time < flash_duration:
+            # Flash pattern: on for 0.2s, off for 0.2s
+            GPIO.output(LED_PIN, GPIO.HIGH)
+            time.sleep(0.2)
+            GPIO.output(LED_PIN, GPIO.LOW)
+            time.sleep(0.2)
+            
+    except Exception as e:
+        print(f"[LED] Error in flash thread: {e}")
+    finally:
+        # Ensure LED is off
+        GPIO.output(LED_PIN, GPIO.LOW)
 
 # ============================================================================
 # FSR MONITORING THREAD
@@ -498,9 +620,9 @@ def fsr_monitoring_thread():
                     fsr_tap_count += 1
                     print(f"[FSR Thread] Double tap count: {fsr_tap_count}")
                     
-                    # Double tap detected - show angry face
+                    # Double tap detected - start recording sequence
                     if fsr_tap_count >= 2:
-                        print("[FSR Thread] ✅ Double tap detected! Showing angry face...")
+                        print("[FSR Thread] ✅ Double tap detected! Starting recording...")
                         
                         # Send event to UI thread
                         fsr_event_queue.put(('fsr_detected',))
@@ -548,14 +670,14 @@ def process_ui_commands():
             event = fsr_event_queue.get_nowait()
             
             if event[0] == 'fsr_detected':
-                print("[UI Thread] FSR double-tap detected!")
+                print("[UI Thread] FSR double-tap detected! Starting recording sequence...")
                 
                 # Show angry face immediately
                 show_face("angry")
                 
-                # Return to happy face after 3 seconds
+                # Start recording after 3 seconds
                 if root and root.winfo_exists():
-                    root.after(3000, lambda: show_face("happy"))
+                    root.after(3000, start_recording)
                 
     except queue.Empty:
         pass
@@ -563,6 +685,14 @@ def process_ui_commands():
     # Schedule next check
     if root and root.winfo_exists():
         root.after(100, process_ui_commands)
+
+def start_recording():
+    """Start the recording sequence"""
+    print("[UI Thread] Starting recording sequence...")
+    
+    # Start recording in a separate thread
+    recording_thread = threading.Thread(target=record_audio, daemon=True)
+    recording_thread.start()
 
 # ============================================================================
 # KEYBOARD CONTROLS
@@ -578,6 +708,12 @@ def setup_keyboard_controls():
             show_face("happy")
         elif key == 'c':
             show_weather()
+        elif key == 'r':
+            # Manual recording test
+            print("[Manual] Starting recording test...")
+            show_face("angry")
+            if root and root.winfo_exists():
+                root.after(1000, start_recording)
         elif key == 'q':
             cleanup_and_exit()
     
@@ -657,15 +793,21 @@ def cleanup_and_exit():
 def main():
     """Main function"""
     print("="*60)
-    print("SEKAI INTERFACE - KEYBOARD + FSR CONTROLS")
+    print("SEKAI INTERFACE - COMPLETE VERSION")
     print("="*60)
     print("\nKEYBOARD SHORTCUTS:")
     print("  a = Show Calendar")
     print("  b = Show Happy Face")
     print("  c = Show Weather")
+    print("  r = Manual Recording Test")
     print("  q = Quit")
     print("\nFSR CONTROL:")
-    print("  Double-tap FSR = Show angry face for 3 seconds")
+    print("  Double-tap FSR = angry face → 3 sec → record → happy face")
+    print("\nRECORDING FEATURES:")
+    print("  • 5-second audio recording")
+    print("  • LED flashes while recording")
+    print("  • Audio playback after recording")
+    print("  • Uses device: plughw:2,0")
     print("="*60)
     
     # Check if image directory exists
@@ -686,7 +828,7 @@ def main():
     
     # Start main loop
     print("\n[Main] Starting Tkinter main loop...")
-    print("[Main] Press a/b/c or double-tap FSR\n")
+    print("[Main] Press a/b/c/r or double-tap FSR\n")
     
     try:
         root.mainloop()
