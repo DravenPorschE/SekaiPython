@@ -85,6 +85,9 @@ current_photo = None
 # Image cache
 image_cache = {}
 
+# Audio device
+AUDIO_DEVICE = "plughw:2,0"
+
 # ============================================================================
 # MODULAR VIEW FUNCTIONS
 # ============================================================================
@@ -459,6 +462,109 @@ def set_face_mood(mood):
     return current_mood
 
 # ============================================================================
+# FSR MONITORING THREAD
+# ============================================================================
+
+def fsr_monitoring_thread():
+    """Monitor FSR sensor in separate thread"""
+    global fsr_last_tap_time, fsr_tap_count, fsr_last_state, fsr_cooldown_until
+    global fsr_thread_running
+    
+    print("[FSR Thread] Starting FSR monitoring...")
+    
+    while fsr_thread_running:
+        try:
+            current_time = time.time()
+            fsr_value = fsr_channel.value
+            
+            # Check if we're in cooldown period
+            if current_time < fsr_cooldown_until:
+                fsr_last_state = False
+                time.sleep(0.05)
+                continue
+            
+            # Check if FSR is being pressed
+            fsr_pressed = fsr_value > FSR_THRESHOLD
+            
+            # Detect press start (rising edge)
+            if fsr_pressed and not fsr_last_state:
+                print(f"[FSR Thread] FSR pressed: {fsr_value}")
+                fsr_last_state = True
+                
+                # Check for double tap
+                time_since_last_tap = current_time - fsr_last_tap_time
+                
+                if time_since_last_tap < FSR_DOUBLE_TAP_TIMEOUT:
+                    fsr_tap_count += 1
+                    print(f"[FSR Thread] Double tap count: {fsr_tap_count}")
+                    
+                    # Double tap detected - show angry face
+                    if fsr_tap_count >= 2:
+                        print("[FSR Thread] ✅ Double tap detected! Showing angry face...")
+                        
+                        # Send event to UI thread
+                        fsr_event_queue.put(('fsr_detected',))
+                        
+                        # Reset for next time
+                        fsr_tap_count = 0
+                        fsr_cooldown_until = current_time + FSR_COOLDOWN
+                else:
+                    # First tap
+                    fsr_tap_count = 1
+                    print("[FSR Thread] First tap detected")
+                
+                fsr_last_tap_time = current_time
+            
+            # Detect release (falling edge)
+            elif not fsr_pressed and fsr_last_state:
+                fsr_last_state = False
+                print("[FSR Thread] FSR released")
+            
+            # Reset tap count if too much time has passed
+            if current_time - fsr_last_tap_time > FSR_DOUBLE_TAP_TIMEOUT * 2:
+                if fsr_tap_count > 0:
+                    print(f"[FSR Thread] Tap timeout - resetting")
+                    fsr_tap_count = 0
+            
+            time.sleep(0.05)  # 50ms sampling rate
+            
+        except Exception as e:
+            print(f"[FSR Thread] Error: {e}")
+            time.sleep(0.1)
+    
+    print("[FSR Thread] Thread stopped")
+
+# ============================================================================
+# UI COMMAND PROCESSING (Main Thread)
+# ============================================================================
+
+def process_ui_commands():
+    """Process commands from other threads (runs in main thread)"""
+    global root
+    
+    # Process FSR events
+    try:
+        while not fsr_event_queue.empty():
+            event = fsr_event_queue.get_nowait()
+            
+            if event[0] == 'fsr_detected':
+                print("[UI Thread] FSR double-tap detected!")
+                
+                # Show angry face immediately
+                show_face("angry")
+                
+                # Return to happy face after 3 seconds
+                if root and root.winfo_exists():
+                    root.after(3000, lambda: show_face("happy"))
+                
+    except queue.Empty:
+        pass
+    
+    # Schedule next check
+    if root and root.winfo_exists():
+        root.after(100, process_ui_commands)
+
+# ============================================================================
 # KEYBOARD CONTROLS
 # ============================================================================
 
@@ -509,6 +615,9 @@ def setup_tkinter_ui():
     # Start with happy face
     show_face("happy")
     
+    # Start UI command processor
+    root.after(100, process_ui_commands)
+    
     # Setup keyboard controls
     setup_keyboard_controls()
     
@@ -548,13 +657,15 @@ def cleanup_and_exit():
 def main():
     """Main function"""
     print("="*60)
-    print("SEKAI INTERFACE - SIMPLE KEYBOARD CONTROLS")
+    print("SEKAI INTERFACE - KEYBOARD + FSR CONTROLS")
     print("="*60)
     print("\nKEYBOARD SHORTCUTS:")
     print("  a = Show Calendar")
     print("  b = Show Happy Face")
     print("  c = Show Weather")
     print("  q = Quit")
+    print("\nFSR CONTROL:")
+    print("  Double-tap FSR = Show angry face for 3 seconds")
     print("="*60)
     
     # Check if image directory exists
@@ -568,12 +679,22 @@ def main():
     # Setup cleanup on window close
     root.protocol("WM_DELETE_WINDOW", cleanup_and_exit)
     
+    # Start FSR monitoring thread
+    print("\n[Main] Starting FSR monitoring thread...")
+    fsr_thread = threading.Thread(target=fsr_monitoring_thread, daemon=False)
+    fsr_thread.start()
+    
     # Start main loop
     print("\n[Main] Starting Tkinter main loop...")
-    print("[Main] Press a/b/c to switch views\n")
+    print("[Main] Press a/b/c or double-tap FSR\n")
     
     try:
         root.mainloop()
+        
+        # Wait for FSR thread to finish
+        if fsr_thread.is_alive():
+            print("[Main] Waiting for FSR thread to finish...")
+            fsr_thread.join(timeout=2.0)
             
     except KeyboardInterrupt:
         print("\n[Main] Keyboard interrupt received")
