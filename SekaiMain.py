@@ -13,7 +13,7 @@ import random
 import os
 from datetime import datetime, timedelta, date
 from weather import get_weather_for_city_json
-from sekai_wakeword_detection import SekaiWakeWordDetector
+from sekai_wakeword_detection import SekaiDetector
 
 from send_audio import transcribe_wav_file
 import requests
@@ -112,11 +112,8 @@ last_interaction_time = time.time()
 idle_timer_start = None
 is_idle = False
 
-# Add after GPIO setup in your main script
-ACCESS_KEY = "VM996Z/2j8ghpUlIqlqxMmVAOxOHHCMujdWtGLAZ3i43Q0vTinykmg=="
-PPN_FILE = "hello-sec-ai_en_raspberry-pi_v3_0_0.ppn"
-
-wake_detector = SekaiWakeWordDetector(access_key=ACCESS_KEY, ppn_file_path=PPN_FILE)
+# Create Vosk-based wake word detector (listens for "hey girl")
+wake_detector = SekaiDetector()
 
 def load_image(image_name):
     """Load JPG image from sekai_faces folder and resize to fit screen"""
@@ -328,13 +325,53 @@ def deactivate_sekai():
     # Reset to happy face after cooldown
     root.after(1000, lambda: set_mood("happy"))
 
-# Set callback for wake word detection
+# 2. Define the callback function IN YOUR MAIN SCRIPT
 def on_wake_detected():
-    """Called when wake word is detected"""
-    # Activate via voice mode
+    """Called when wake word 'hey girl' is detected"""
+    print("🔊 Wake word 'hey girl' detected! Activating Sekai...")
     activate_sekai(mode="voice", emotion="happy")
 
-wake_detector.on_wake_callback = on_wake_detected
+# 3. Monkey-patch the SekaiDetector class to add missing methods
+def patched_on_hey_girl_detected(self):
+    """Patched version that calls our callback"""
+    print("👧 [SEKAI] Hey there! You called?")
+    print("   *Activates robot mode*")
+    
+    # Call our callback
+    if hasattr(self, '_wake_callback') and self._wake_callback:
+        self._wake_callback()
+    
+    time.sleep(2)  # Cooldown period
+
+# Replace the method in the class
+SekaiDetector.on_hey_girl_detected = patched_on_hey_girl_detected
+
+# 4. Add start() method to the class
+def start_detector(self):
+    """Start listening in background thread"""
+    import threading
+    print("🚀 Starting wake word detector in background...")
+    self.listening_thread = threading.Thread(
+        target=self.start_listening,
+        args=(0,),  # Use default device
+        daemon=True
+    )
+    self.listening_thread.start()
+    print("✅ Wake word detector started")
+
+SekaiDetector.start = start_detector
+
+# 5. Add stop() method to the class  
+def stop_detector(self):
+    """Stop listening"""
+    print("🛑 Stopping wake word detector...")
+
+SekaiDetector.stop = stop_detector
+
+# 6. Set the callback on the INSTANCE (not the class)
+wake_detector._wake_callback = on_wake_detected
+
+# 7. Start the detector
 wake_detector.start()
 
 def set_mood(mood):
@@ -800,41 +837,6 @@ def monitor_fsr():
             
         except Exception as e:
             print(f"FSR monitoring error: {e}")
-            time.sleep(0.1)
-
-# Alternative: Simple FSR monitoring (if double tap doesn't work well)
-def monitor_fsr_simple():
-    """Simple FSR monitoring - single press activates"""
-    global fsr_is_active, fsr_cooldown_until
-    
-    while True:
-        try:
-            current_time = time.time()
-            fsr_value = fsr_channel.value
-            
-            # Check cooldown
-            if current_time < fsr_cooldown_until or fsr_is_active:
-                time.sleep(0.1)
-                continue
-            
-            # Check for press
-            if fsr_value > FSR_THRESHOLD:
-                print(f"FSR activated: {fsr_value}")
-                
-                # Schedule activation
-                root.after(0, lambda: activate_sekai(mode="touch"))
-                
-                # Set cooldown
-                fsr_cooldown_until = current_time + FSR_COOLDOWN
-                
-                # Wait for release
-                while fsr_channel.value > FSR_THRESHOLD / 2:
-                    time.sleep(0.05)
-            
-            time.sleep(0.05)
-            
-        except Exception as e:
-            print(f"FSR simple error: {e}")
             time.sleep(0.1)
 
 # Start FSR monitoring in separate thread
