@@ -15,6 +15,14 @@ from datetime import datetime, timedelta, date
 from weather import get_weather_for_city_json
 from sekai_wakeword_detection import SekaiWakeWordDetector
 
+from send_audio import transcribe_wav_file
+import requests
+import os
+from typecast_api import text_to_speech_api
+from ai_talk import getSekaiResponse
+from get_intent import getSekaiIntent
+import json
+
 today = date.today()
 year = today.year
 month = today.month
@@ -198,23 +206,20 @@ def activate_sekai(mode="touch", emotion=None):
     # Determine emotion
     if emotion is None:
         if mode == "voice":
-            # Wake word usually makes her happy
             emotion = "happy"
         else:
-            # For touch, 70% happy, 30% angry
             emotion = random.choices(["happy", "angry"], weights=[7, 3])[0]
     
     # Switch to face view if not already
     if current_view != "face":
         root.after(0, show_sekai_face)
     else:
-        # If already in face view, reset idle timer
         reset_idle_timer()
     
     # Set the mood
     root.after(100, lambda e=emotion: set_mood(e))
     
-    # Turn on LED
+    # Turn on LED (greeting phase)
     GPIO.output(LED_PIN, GPIO.HIGH)
     
     # Play appropriate audio
@@ -226,29 +231,98 @@ def activate_sekai(mode="touch", emotion=None):
             audio_file = os.path.join(audio_folder, random.choice(files))
             print(f"Playing: {audio_file}")
             
-            # Play in background thread to avoid blocking
-            def play_audio():
-                os.system(f"aplay {audio_file} 2>/dev/null")
+            # Play greeting
+            os.system(f"aplay {audio_file} 2>/dev/null")
             
-            audio_thread = threading.Thread(target=play_audio, daemon=True)
-            audio_thread.start()
+            # After greeting, start recording
+            start_recording()
+            
         else:
             print(f"No audio files found in {audio_folder}")
+            # Start recording immediately
+            start_recording()
+            
     except Exception as e:
         print(f"Audio error: {e}")
+        # Start recording on error
+        start_recording()
     
     # Set active state
     fsr_is_active = True
+
+
+def start_recording():
+    """Start recording a 5-second audio clip"""
+    print("🎤 Starting 5-second recording...")
     
-    # Schedule deactivation
-    root.after(5000, deactivate_sekai)
+    # LED stays ON during recording
+    GPIO.output(LED_PIN, GPIO.HIGH)
+    
+    # Always save as recorded_command.wav (overwrites previous)
+    recording_file = "recorded_command.wav"
+    print(f"Recording to: {recording_file}")
+    
+    # Record for 5 seconds
+    # Using arecord with parameters suitable for Whisper
+    arecord_command = f"arecord -d 5 -f S16_LE -t wav -r 16000 -c 1 {recording_file}"
+    return_code = os.system(arecord_command)
+    
+    if return_code == 0:
+        print(f"✅ Recording finished: {recording_file}")
+        if os.path.exists(recording_file):
+            file_size = os.path.getsize(recording_file)
+            print(f"📁 File size: {file_size} bytes ({file_size/1024:.1f} KB)")
+        else:
+            print(f"⚠️ File created but not found: {recording_file}")
+    else:
+        print(f"❌ Recording failed with code: {return_code}")
+    
+    
+    result = transcribe_wav_file("recorded_command.wav")
+    
+    if result:
+        print("Transcription:")
+        print(result)
+
+        API_KEY = "__pltMzLwjRtejoHYcjCEi984cBgKa6qMU6EiSkEs2Xne "  # Replace with your actual API key
+    
+        # Test text
+        #test_text = ai_response
+
+        ai_intent = getSekaiIntent(result)
+
+        print(ai_intent)
+        data = json.loads(ai_intent)  # Parse JSON string to dictionary
+        command_value = data["command"]  # Access the value
+
+        ai_response = getSekaiResponse(result, current_mood)
+
+        # Generate speech
+        audio_file = text_to_speech_api(ai_response, API_KEY)
+        
+        if audio_file and os.path.exists(audio_file):
+            print(f"\n🎵 To play the audio on Raspberry Pi:")
+            print(f"   aplay {audio_file}")
+            
+            # Optional: Play it automatically
+            import subprocess
+            try:
+                subprocess.run(['aplay', audio_file], check=True)
+            except:
+                print("   Could not play audio automatically")
+        
+        else:
+            print("Transcription failed.")
+    # Deactivate Sekai after recording
+    deactivate_sekai()
+
 
 def deactivate_sekai():
     """Deactivate Sekai robot"""
     global fsr_is_active
     
     fsr_is_active = False
-    GPIO.output(LED_PIN, GPIO.LOW)
+    GPIO.output(LED_PIN, GPIO.LOW)  # Turn off LED
     print("Sekai deactivated")
     
     # Reset to happy face after cooldown
@@ -764,7 +838,7 @@ def monitor_fsr_simple():
             time.sleep(0.1)
 
 # Start FSR monitoring in separate thread
-fsr_thread = threading.Thread(target=monitor_fsr_simple, daemon=True)
+fsr_thread = threading.Thread(target=monitor_fsr, daemon=True)
 fsr_thread.start()
 
 # Handle window close

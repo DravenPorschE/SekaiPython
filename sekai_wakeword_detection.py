@@ -9,7 +9,7 @@ import time
 import re
 
 print("=" * 60)
-print("🎤 SEKAI Wake Word Detector with Vosk")
+print("🎤 SEKAI Wake Word Detector with Vosk - HEY GIRL")
 print("=" * 60)
 
 class SekaiDetector:
@@ -104,44 +104,149 @@ class SekaiDetector:
             print("   4. Make sure folder exists: 'vosk-model-small-en-us-0.22'")
             sys.exit(1)
     
-    def contains_sekai(self, text):
-        """Check if text contains 'hello sekai' phonetically"""
+    def contains_hey_girl(self, text):
+        """Check if text contains 'hey girl' phonetically"""
         text_lower = text.lower()
         
-        # Exact match (unlikely but possible)
-        if "hello sekai" in text_lower:
-            return True
-        
-        # Common mishearings by Vosk
-        sekai_patterns = [
-            r"hello\s+say\s+ky",
-            r"hello\s+see\s+kai",
-            r"hello\s+se\s+kai",
-            r"hello\s+say\s+kai",
-            r"hello\s+the\s+kai",
-            r"hello\s+sega",
-            r"hello\s+saga",
-            r"hello\s+saki",
-            r"hello\s+sakai",
-            r"hello\s+sky",
-            r"halo\s+sekai",
-            r"hell o\s+sekai",
+        # Exact matches
+        exact_matches = [
+            "hey girl",
+            "hey girl",  # doubled for emphasis
+            "hey girly",
+            "hay girl",
+            "hey gal",
+            "hey gurl",
+            "hey grill",
+            "hey girlie",
+            "hey girls",
         ]
         
-        for pattern in sekai_patterns:
+        for phrase in exact_matches:
+            if phrase in text_lower:
+                return True
+        
+        # Common mishearings by Vosk for "hey"
+        hey_patterns = [
+            "hey",
+            "hay",
+            "he",
+            "hai",
+            "heh",
+            "hee",
+            "a",
+            "eh",
+            "ay",
+        ]
+        
+        # Common mishearings for "girl"
+        girl_patterns = [
+            "girl",
+            "gurl",
+            "grill",
+            "girly",
+            "girls",
+            "garl",
+            "gal",
+            "gerl",
+            "gull",
+            "gir",
+            "garl",
+            "go",
+            "gur",
+            "gil",
+            "girls",
+            "girly",
+            "girlish",
+        ]
+        
+        # Check for combinations
+        words = text_lower.split()
+        
+        for i in range(len(words) - 1):
+            current_word = words[i]
+            next_word = words[i + 1]
+            
+            # Check if current word sounds like "hey"
+            is_hey_like = any(
+                pattern in current_word or 
+                current_word.startswith(pattern[:2]) or 
+                current_word.endswith(pattern[-2:]) or
+                pattern.startswith(current_word[:2])
+                for pattern in hey_patterns
+            )
+            
+            # Check if next word sounds like "girl"
+            is_girl_like = any(
+                pattern in next_word or 
+                next_word.startswith(pattern[:2]) or 
+                next_word.endswith(pattern[-2:]) or
+                pattern.startswith(next_word[:2])
+                for pattern in girl_patterns
+            )
+            
+            if is_hey_like and is_girl_like:
+                # Additional check: words should be reasonably close
+                if len(current_word) >= 2 and len(next_word) >= 3:
+                    return True
+        
+        # Check with simple regex patterns
+        hey_girl_patterns = [
+            r"hey\s+g[ieaou][rl]{2,3}",  # hey + g + vowel + rl/ll
+            r"hay\s+g[ieaou][rl]{2,3}",
+            r"he\s+g[ieaou][rl]{2,3}",
+            r"hai\s+g[ieaou][rl]{2,3}",
+            r"a\s+g[ieaou][rl]{2,3}",
+            r"eh\s+g[ieaou][rl]{2,3}",
+            r"ay\s+g[ieaou][rl]{2,3}",
+            r"hey\s+g[a-z]*rl",  # hey + anything ending with rl
+            r"hey\s+g[a-z]*l$",  # hey + anything ending with l
+        ]
+        
+        for pattern in hey_girl_patterns:
             if re.search(pattern, text_lower):
                 return True
         
-        # Check for "hello" followed by any 2-syllable word starting with S
-        words = text_lower.split()
-        for i in range(len(words) - 1):
-            if words[i] in ["hello", "halo", "hellow", "hey"]:
-                next_word = words[i + 1]
-                # Check if it could be "sekai"
-                if (len(next_word) >= 4 and 
-                    next_word.startswith(('s', 'c')) and 
-                    any(vowel in next_word for vowel in 'aeiou')):
-                    return True
+        # Check for single word variations (might be misheard as one word)
+        single_word_variations = [
+            "heygirl",
+            "haygirl",
+            "heygurl",
+            "haygurl",
+            "heygirls",
+            "heygirly",
+        ]
+        
+        for variation in single_word_variations:
+            if variation in text_lower:
+                return True
+        
+        # Phonetic matching
+        # "hey girl" phonetically could be: /heɪ gɝl/
+        # Common approximations: "hay gurl", "hey garl", "he gir", etc.
+        phonetic_patterns = [
+            r"h[aeiouy][\s\-\.]?g[aeiou]r?l",  # h + vowel + g + vowel + r?l
+            r"h[aeiouy]+\s?g[aeiou]+r?[le]+",  # h + vowels + g + vowels + r? + le
+            r"[ae]?\s?g[aeiou]r?l",  # "a girl", "e girl"
+        ]
+        
+        for pattern in phonetic_patterns:
+            if re.search(pattern, text_lower):
+                # Check if it's likely "hey girl" and not something else
+                match = re.search(pattern, text_lower)
+                if match:
+                    matched_text = match.group(0)
+                    # Simple check: should contain 'g' followed by vowel
+                    if 'g' in matched_text and any(vowel in matched_text for vowel in 'aeiou'):
+                        # Don't match things like "how are you" or "hi there"
+                        not_patterns = [
+                            "how are",
+                            "hi there",
+                            "hello",
+                            "good morning",
+                            "good day",
+                        ]
+                        if not any(np in text_lower for np in not_patterns):
+                            return True
         
         return False
     
@@ -163,7 +268,7 @@ class SekaiDetector:
         return input_devices
     
     def start_listening(self, device_index=None):
-        """Start listening for 'hello sekai'"""
+        """Start listening for 'hey girl'"""
         
         pa = pyaudio.PyAudio()
         
@@ -199,9 +304,9 @@ class SekaiDetector:
         )
         
         print(f"\n{'='*60}")
-        print("👂 LISTENING FOR 'HELLO SEKAI'")
-        print("   Say clearly: 'HELL-O SE-KAI'")
-        print("   Common mishearings will also work")
+        print("👂 LISTENING FOR 'HEY GIRL'")
+        print("   Say clearly: 'HEY GIRL'")
+        print("   Common variations: 'HAY GURL', 'HEY GURLY', 'HEY GIRLIE'")
         print("   Press Ctrl+C to stop")
         print('='*60 + '\n')
         
@@ -220,16 +325,16 @@ class SekaiDetector:
                     if text:
                         print(f"📝 Vosk heard: '{text}'")
                         
-                        if self.contains_sekai(text):
+                        if self.contains_hey_girl(text):
                             detection_count += 1
                             print(f"\n{'🎯'*20}")
-                            print(f"🎯 'HELLO SEKAI' DETECTED! (#{detection_count})")
+                            print(f"🎯 'HEY GIRL' DETECTED! (#{detection_count})")
                             print(f"🎯 Time: {time.strftime('%H:%M:%S')}")
                             print(f"🎯 Original: '{text}'")
                             print(f"{'🎯'*20}\n")
                             
                             # Robot activation
-                            self.on_sekai_detected()
+                            self.on_hey_girl_detected()
                 
                 # Check partial results for live feedback
                 partial = json.loads(self.recognizer.PartialResult())
@@ -248,10 +353,12 @@ class SekaiDetector:
             pa.terminate()
             print("✅ Cleanup complete")
     
-    def on_sekai_detected(self):
-        """What happens when 'hello sekai' is detected"""
-        print("🤖 [SEKAI] Konnichiwa! I'm awake!")
+    def on_hey_girl_detected(self):
+        """What happens when 'hey girl' is detected"""
+        print("👧 [SEKAI] Hey there! You called?")
         print("   *Activates robot mode*")
+        print("   *Shows happy face*")
+        print("   *Lights up LED*")
         
         # Add your robot actions here:
         # 1. Play greeting sound
