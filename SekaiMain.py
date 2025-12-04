@@ -23,6 +23,8 @@ from ai_talk import getSekaiResponse
 from get_intent import getSekaiIntent
 import json
 
+import time
+
 today = date.today()
 year = today.year
 month = today.month
@@ -347,17 +349,23 @@ def patched_on_hey_girl_detected(self):
 SekaiDetector.on_hey_girl_detected = patched_on_hey_girl_detected
 
 # 4. Add start() method to the class
-def start_detector(self):
+# 4. Add start() method to the class
+def start_detector(self, device_index=None):
     """Start listening in background thread"""
     import threading
     print("🚀 Starting wake word detector in background...")
+    
+    # If no device specified, use default (0)
+    if device_index is None:
+        device_index = 0
+    
     self.listening_thread = threading.Thread(
         target=self.start_listening,
-        args=(0,),  # Use default device
+        args=(device_index,),  # Pass the device index
         daemon=True
     )
     self.listening_thread.start()
-    print("✅ Wake word detector started")
+    print(f"✅ Wake word detector started on device {device_index}")
 
 SekaiDetector.start = start_detector
 

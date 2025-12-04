@@ -289,18 +289,32 @@ class SekaiDetector:
                 device_index = input_devices[0]
                 print(f"⚠️  Using default device: {device_index}")
         
-        # Get device info
+        # Get device info to check available channels
         device_info = pa.get_device_info_by_index(device_index)
         print(f"\n✅ Using: [{device_index}] {device_info['name']}")
         
-        # Open audio stream
+        # Get available input channels from device
+        available_channels = int(device_info['maxInputChannels'])
+        
+        # Use mono (1 channel) if available, otherwise use whatever channels are available
+        channels = 1 if available_channels >= 1 else available_channels
+        
+        if available_channels == 0:
+            print(f"❌ Device has no input channels! Cannot use for recording.")
+            pa.terminate()
+            return
+        
+        print(f"📊 Device supports {available_channels} input channel(s)")
+        print(f"📊 Using {channels} channel(s) for recording")
+        
+        # Open audio stream with CORRECT parameters
         stream = pa.open(
-            rate=48000,
-            channels=2,  # Mono uses less CPU
+            rate=16000,                    # Vosk expects 16kHz, not 48kHz
+            channels=channels,            # Use correct channel count
             format=pyaudio.paInt16,
             input=True,
             frames_per_buffer=2048,
-            input_device_index=1
+            input_device_index=device_index  # Use the selected device index
         )
         
         print(f"\n{'='*60}")
