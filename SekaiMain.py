@@ -357,7 +357,7 @@ def start_detector(self, device_index=None):
     
     # If no device specified, use default (0)
     if device_index is None:
-        device_index = 0
+        device_index = 2
     
     self.listening_thread = threading.Thread(
         target=self.start_listening,
