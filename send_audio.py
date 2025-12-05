@@ -7,7 +7,7 @@ import json
 
 current_mood = "happy"
 
-def transcribe_wav_file(file_path, server_url="https://sekaiserver-production.up.railway.app"):
+def transcribe_wav_file(file_path, server_url="https://sekaiserver-production-3388.up.railway.app"):
     """
     Simple function to transcribe a WAV file using the local server
     """
