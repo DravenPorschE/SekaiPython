@@ -79,7 +79,7 @@ weather_frame = None
 face_label = None
 
 # Current state
-current_view = "black"
+current_view = "face"  # CHANGED: Start with face view
 current_mood = "happy"
 current_photo = None
 
@@ -155,19 +155,31 @@ def show_face():
     
     return face_frame
 
-def show_recording_face():
-    """Show recording face with LED indicator - NO TEXT OVERLAY"""
-    global current_view, face_frame
+def show_default_face():
+    """Show default happy face - used at startup"""
+    global current_view, face_frame, current_mood
     
-    print("[UI] Showing recording face (no text)")
+    print("[UI] Showing default happy face")
     
-    if current_view != "face":
-        show_face()  # Switch to face view first with random mood
+    # Hide other views
+    hide_all_views()
     
-    # Show angry face for recording (no text overlay)
-    set_face_mood("angry")
+    # Create face frame if it doesn't exist
+    if not face_frame or not face_frame.winfo_exists():
+        face_frame = create_face_view()
+        face_frame.grid(row=0, column=0, sticky="nsew")
+    else:
+        face_frame.grid(row=0, column=0, sticky="nsew")
     
-    update_title("Recording...")
+    current_view = "face"
+    current_mood = "happy"
+    
+    # Set to happy mood
+    set_face_mood("happy")
+    
+    update_title("Sekai is happy")
+    
+    return face_frame
 
 def show_weather():
     """Show weather view - press 'c'"""
@@ -492,76 +504,90 @@ def set_face_mood(mood):
 # ============================================================================
 
 def record_audio():
-    """Record audio for 5 seconds with flashing LED"""
+    """Record audio for 5 seconds with flashing LED - NON-BLOCKING"""
     print("\n" + "="*50)
     print("STARTING 5-SECOND AUDIO RECORDING")
     print("="*50)
+    
+    # Change title to show recording
+    update_title("Recording...")
     
     # Start LED flashing in a separate thread
     flash_thread = threading.Thread(target=flash_led_while_recording, daemon=True)
     flash_thread.start()
     
-    # Change title to show recording
-    update_title("Recording...")
-    
     # Record for 5 seconds
     recording_file = "test_recording.wav"
     print(f"[Recording] Saving to: {recording_file}")
     
-    # Record command with your audio device
+    # Record command with your audio device - USE subprocess.Popen for non-blocking
     record_command = f"arecord -d 5 -f S16_LE -r 16000 -c 1 -D {AUDIO_DEVICE} {recording_file}"
     print(f"[Recording] Command: {record_command}")
     
-    # Start recording
-    start_time = time.time()
     print(f"[Recording] Starting recording at: {time.strftime('%H:%M:%S')}")
     
     try:
-        # This runs in the recording thread, blocks for 5 seconds
-        result = subprocess.run(record_command, shell=True, capture_output=True, text=True)
-        end_time = time.time()
+        # Use Popen instead of run - non-blocking
+        process = subprocess.Popen(record_command, shell=True, 
+                                 stdout=subprocess.PIPE, 
+                                 stderr=subprocess.PIPE)
         
-        recording_time = end_time - start_time
-        print(f"[Recording] Recording finished at: {time.strftime('%H:%M:%S')}")
-        print(f"[Recording] Duration: {recording_time:.2f} seconds")
-        
-        if result.returncode == 0:
-            print("[Recording] ✅ Recording successful!")
+        # Wait for process to complete in background
+        def wait_for_recording():
+            stdout, stderr = process.communicate()
+            return_code = process.returncode
             
-            if os.path.exists(recording_file):
-                file_size = os.path.getsize(recording_file)
-                print(f"[Recording] 📁 File size: {file_size} bytes")
+            print(f"[Recording] Recording finished at: {time.strftime('%H:%M:%S')}")
+            
+            if return_code == 0:
+                print("[Recording] ✅ Recording successful!")
                 
-                # Play back the recording
-                print("[Recording] Playing back recording...")
-                play_command = f"aplay {recording_file}"
-                play_result = subprocess.run(play_command, shell=True, capture_output=True, text=True)
-                
-                if play_result.returncode == 0:
-                    print("[Recording] ✅ Playback successful!")
+                if os.path.exists(recording_file):
+                    file_size = os.path.getsize(recording_file)
+                    print(f"[Recording] 📁 File size: {file_size} bytes")
+                    
+                    # Play back the recording in separate thread
+                    playback_thread = threading.Thread(target=playback_audio, 
+                                                     args=(recording_file,), 
+                                                     daemon=True)
+                    playback_thread.start()
                 else:
-                    print(f"[Recording] ❌ Playback failed: {play_result.stderr[:100]}")
+                    print(f"[Recording] ❌ File not created")
             else:
-                print(f"[Recording] ❌ File not created")
-        else:
-            print(f"[Recording] ❌ Recording failed!")
-            print(f"[Recording] Error: {result.stderr[:200]}")
+                print(f"[Recording] ❌ Recording failed!")
+                print(f"[Recording] Error: {stderr.decode()[:200]}")
+            
+            # Stop LED and return to happy face
+            GPIO.output(LED_PIN, GPIO.LOW)
+            if root and root.winfo_exists():
+                # Set back to default happy face
+                set_face_mood("happy")
+                update_title("Sekai is happy")  # Update title to match
+        
+        # Start waiting in separate thread
+        wait_thread = threading.Thread(target=wait_for_recording, daemon=True)
+        wait_thread.start()
             
     except Exception as e:
         print(f"[Recording] ❌ Exception: {e}")
-    
-    # Stop LED flashing and turn off
-    GPIO.output(LED_PIN, GPIO.LOW)
-    
-    print("\n" + "="*50)
-    print("RECORDING COMPLETE")
-    print("="*50 + "\n")
-    
-    # RETURN TO DEFAULT HAPPY FACE AFTER RECORDING
-    if root and root.winfo_exists():
-        # Set back to default happy face
-        set_face_mood("happy")
-        update_title("Sekai is happy")  # Update title to match
+        GPIO.output(LED_PIN, GPIO.LOW)
+        if root and root.winfo_exists():
+            set_face_mood("happy")
+            update_title("Sekai is happy")
+
+def playback_audio(recording_file):
+    """Play back recorded audio"""
+    print("[Recording] Playing back recording...")
+    play_command = f"aplay {recording_file}"
+    try:
+        play_result = subprocess.run(play_command, shell=True, 
+                                   capture_output=True, text=True)
+        if play_result.returncode == 0:
+            print("[Recording] ✅ Playback successful!")
+        else:
+            print(f"[Recording] ❌ Playback failed: {play_result.stderr[:100]}")
+    except Exception as e:
+        print(f"[Recording] Playback error: {e}")
 
 def flash_led_while_recording():
     """Flash LED while recording is in progress"""
@@ -673,8 +699,16 @@ def process_ui_commands():
             if event[0] == 'fsr_detected':
                 print("[UI Thread] FSR double-tap detected! Starting recording sequence...")
                 
-                # Show angry face immediately (for recording)
-                set_face_mood("angry")
+                # CHOOSE RANDOM MOOD FIRST (70% happy, 30% angry)
+                mood = random.choices(
+                    list(MOOD_PROBABILITIES.keys()), 
+                    weights=list(MOOD_PROBABILITIES.values())
+                )[0]
+                
+                print(f"[UI Thread] Selected random mood: {mood}")
+                
+                # Show the randomly chosen mood face
+                set_face_mood(mood)
                 
                 # Start recording after 3 seconds
                 if root and root.winfo_exists():
@@ -729,6 +763,9 @@ def setup_keyboard_controls():
                 root.after(1000, start_recording)
         elif key == 'q':
             cleanup_and_exit()
+    
+    if root:
+        root.bind('<Key>', on_key_press)
 
 # ============================================================================
 # TKINTER UI SETUP
@@ -741,12 +778,12 @@ def setup_tkinter_ui():
     calendar.setfirstweekday(calendar.SUNDAY)
     
     root = tk.Tk()
-    root.title("Sekai Interface - Press a/b/c")
+    root.title("Sekai is happy")
     
     # Set fixed screen size
     root.geometry(f"{SCREEN_WIDTH}x{SCREEN_HEIGHT}")
     root.resizable(False, False)
-    root.configure(bg="black")  # Start with black screen
+    root.configure(bg="black")
     
     # GRID SETUP
     root.rowconfigure(0, weight=1)
@@ -759,7 +796,6 @@ def setup_tkinter_ui():
     container.columnconfigure(0, weight=1)
     
     # Create all frames but don't show them yet
-    # They will be shown when buttons are pressed
     global calendar_frame, face_frame, weather_frame, face_label
     
     # Create frames (hidden initially)
@@ -780,6 +816,9 @@ def setup_tkinter_ui():
     
     # Setup keyboard controls
     setup_keyboard_controls()
+    
+    # SHOW DEFAULT HAPPY FACE AT STARTUP
+    show_default_face()
     
     return root
 
@@ -817,7 +856,7 @@ def cleanup_and_exit():
 def main():
     """Main function"""
     print("="*60)
-    print("SEKAI INTERFACE - UPDATED VERSION")
+    print("SEKAI INTERFACE - FIXED VERSION")
     print("="*60)
     print("\nKEYBOARD SHORTCUTS:")
     print("  a = Show Calendar")
@@ -826,12 +865,12 @@ def main():
     print("  r = Manual Recording Test")
     print("  q = Quit")
     print("\nFSR CONTROL:")
-    print("  Double-tap FSR = angry face → 3 sec → record → random face")
+    print("  Double-tap FSR = random mood → 3 sec → record → happy face")
     print("\nCHANGES MADE:")
-    print("  1. Starts with BLACK SCREEN")
-    print("  2. Press 'b' shows random face (70% happy, 30% angry)")
-    print("  3. No text overlay during recording")
-    print("  4. Views load when first accessed")
+    print("  1. Starts with HAPPY FACE (not black screen)")
+    print("  2. FSR shows random mood (70% happy, 30% angry)")
+    print("  3. Non-blocking recording")
+    print("  4. Returns to happy face after recording")
     print("="*60)
     
     # Check if image directory exists
@@ -852,7 +891,7 @@ def main():
     
     # Start main loop
     print("\n[Main] Starting Tkinter main loop...")
-    print("[Main] Starts with BLACK SCREEN - Press a/b/c/r\n")
+    print("[Main] Starts with HAPPY FACE - Press a/b/c/r\n")
     
     try:
         root.mainloop()
