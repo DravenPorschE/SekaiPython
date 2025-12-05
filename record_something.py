@@ -497,12 +497,12 @@ def record_audio():
     print("STARTING 5-SECOND AUDIO RECORDING")
     print("="*50)
     
-    # Show recording face (angry, no text)
-    show_recording_face()
-    
     # Start LED flashing in a separate thread
     flash_thread = threading.Thread(target=flash_led_while_recording, daemon=True)
     flash_thread.start()
+    
+    # Change title to show recording
+    update_title("Recording...")
     
     # Record for 5 seconds
     recording_file = "test_recording.wav"
@@ -557,9 +557,11 @@ def record_audio():
     print("RECORDING COMPLETE")
     print("="*50 + "\n")
     
-    # Return to random face after a delay (70% happy, 30% angry)
+    # RETURN TO DEFAULT HAPPY FACE AFTER RECORDING
     if root and root.winfo_exists():
-        root.after(1000, show_face)
+        # Set back to default happy face
+        set_face_mood("happy")
+        update_title("Sekai is happy")  # Update title to match
 
 def flash_led_while_recording():
     """Flash LED while recording is in progress"""
@@ -708,16 +710,25 @@ def setup_keyboard_controls():
         elif key == 'c':
             show_weather()
         elif key == 'r':
-            # Manual recording test
+            # Manual recording test - follow same flow as FSR
             print("[Manual] Starting recording test...")
-            set_face_mood("angry")
+            
+            # Choose random mood first (70% happy, 30% angry)
+            mood = random.choices(
+                list(MOOD_PROBABILITIES.keys()), 
+                weights=list(MOOD_PROBABILITIES.values())
+            )[0]
+            
+            print(f"[Manual] Selected random mood: {mood}")
+            
+            # Show the randomly chosen mood face
+            set_face_mood(mood)
+            
+            # Start recording after 1 second (faster for manual test)
             if root and root.winfo_exists():
                 root.after(1000, start_recording)
         elif key == 'q':
             cleanup_and_exit()
-    
-    if root:
-        root.bind('<Key>', on_key_press)
 
 # ============================================================================
 # TKINTER UI SETUP
