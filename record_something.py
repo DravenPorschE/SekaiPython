@@ -312,11 +312,49 @@ def create_face_view():
     return frame
 
 def create_weather_view():
-    """Create weather view frame"""
+    """Create weather view frame with real data from weather.py"""
     frame = tk.Frame(container, bg="white")
     frame.rowconfigure(0, weight=1)
     frame.columnconfigure(0, weight=1)
     frame.columnconfigure(1, weight=1)
+    
+    # Try to load real weather data
+    try:
+        from weather import get_weather_for_city_json
+        
+        weather_data = get_weather_for_city_json("Lipa", units="metric")
+        
+        # Extract data
+        city = weather_data.get("city", "Lipa City")
+        country = weather_data.get("country", "PH")
+        current = weather_data.get("current", {})
+        forecast_list = weather_data.get("forecast", [])[:4]  # Get next 4 days
+        
+        # Current weather details
+        current_day = current.get("day", datetime.now().strftime("%A"))
+        current_temp = current.get("temp", 0)
+        current_desc = current.get("description", "Partly Cloudy")
+        current_simple = current.get("simple", "cloudy")
+        
+        # Format temperature
+        current_time = datetime.now().strftime("%I:%M %p")
+        
+    except Exception as e:
+        print(f"[Weather] Error fetching weather: {e}")
+        # Fallback data if API fails
+        city = "Lipa City"
+        country = "PH"
+        current_day = datetime.now().strftime("%A")
+        current_time = datetime.now().strftime("%I:%M %p")
+        current_temp = 34
+        current_desc = "Partly Cloudy"
+        current_simple = "partly cloudy"
+        forecast_list = [
+            {"day": "Tuesday", "temp_day": 37, "simple": "sunny", "description": "Sunny"},
+            {"day": "Wednesday", "temp_day": 36, "simple": "partly cloudy", "description": "Partly Cloudy"},
+            {"day": "Thursday", "temp_day": 35, "simple": "thunderstorm", "description": "Rainy"},
+            {"day": "Friday", "temp_day": 34, "simple": "cloudy", "description": "Cloudy"}
+        ]
     
     # Left panel - Current weather
     left_weather = tk.Frame(frame, bg="#f0f0f0", highlightbackground="gray", 
@@ -324,35 +362,71 @@ def create_weather_view():
     left_weather.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
     
     # Day and time
-    current_day = datetime.now().strftime("%A")
-    current_time = datetime.now().strftime("%I:%M %p")
     tk.Label(left_weather, text=f"{current_day} {current_time}", 
              bg="#f0f0f0", font=("Arial", 14), anchor="w").pack(pady=(10, 5), padx=10, fill="x")
     
-    # Temperature
-    tk.Label(left_weather, text="34°C", bg="#f0f0f0", 
-             font=("Arial", 32, "bold")).pack(pady=20)
+    # Temperature with weather icon
+    temp_frame = tk.Frame(left_weather, bg="#f0f0f0")
+    temp_frame.pack(pady=20)
+    
+    # Load current weather icon from weather_assets
+    try:
+        # Map simple weather type to your image filenames
+        icon_mapping = {
+            "sunny": "sunny_weather.png",
+            "partly cloudy": "partly_cloudy_weather.png",
+            "cloudy": "cloudy_weather.png",
+            "thunderstorm": "thunderstorm_weather.png"
+        }
+        
+        icon_filename = icon_mapping.get(current_simple, "cloudy_weather.png")
+        icon_path = os.path.join("weather_assets", icon_filename)
+        
+        if os.path.exists(icon_path):
+            icon_img = Image.open(icon_path)
+            # Resize to fit - adjust size as needed
+            icon_img = icon_img.resize((80, 80), Image.Resampling.LANCZOS)
+            weather_icon = ImageTk.PhotoImage(icon_img)
+            tk.Label(temp_frame, image=weather_icon, bg="#f0f0f0").pack(side="left", padx=(0, 15))
+            # Keep reference to prevent garbage collection
+            temp_frame.weather_icon = weather_icon
+        else:
+            print(f"[Weather] Icon not found: {icon_path}")
+            # Fallback text
+            tk.Label(temp_frame, text=current_simple[0].upper(), bg="#f0f0f0", 
+                     font=("Arial", 24, "bold")).pack(side="left", padx=(0, 15))
+    except Exception as e:
+        print(f"[Weather] Error loading icon: {e}")
+        # Fallback text
+        tk.Label(temp_frame, text=current_simple[0].upper(), bg="#f0f0f0", 
+                 font=("Arial", 24, "bold")).pack(side="left", padx=(0, 15))
+    
+    # Temperature display
+    tk.Label(temp_frame, text=f"{current_temp}°C", bg="#f0f0f0", 
+             font=("Arial", 32, "bold")).pack(side="left")
     
     # Location
-    tk.Label(left_weather, text="Lipa City", bg="#f0f0f0", 
+    tk.Label(left_weather, text=f"{city}, {country}", bg="#f0f0f0", 
              font=("Arial", 16)).pack(pady=5)
     
-    tk.Label(left_weather, text="Partly Cloudy", bg="#f0f0f0", 
+    # Weather description
+    tk.Label(left_weather, text=current_desc.title(), bg="#f0f0f0", 
              font=("Arial", 14)).pack()
+    
+    # Additional details (if available from API)
+    details_frame = tk.Frame(left_weather, bg="#f0f0f0")
+    details_frame.pack(pady=15, padx=10, fill="x")
     
     # Right panel - Forecast
     right_weather = tk.Frame(frame, bg="white")
     right_weather.grid(row=0, column=1, sticky="nsew", padx=(0, 10), pady=10)
     
-    # Sample forecast data
-    forecast_data = [
-        {"day": "Tuesday", "temp": "37°C", "condition": "Sunny"},
-        {"day": "Wednesday", "temp": "36°C", "condition": "Partly Cloudy"},
-        {"day": "Thursday", "temp": "35°C", "condition": "Rainy"},
-        {"day": "Friday", "temp": "34°C", "condition": "Cloudy"}
-    ]
+    # Forecast header
+    tk.Label(right_weather, text="5-Day Forecast", bg="white", 
+             font=("Arial", 14, "bold")).pack(pady=(0, 10), anchor="w")
     
-    for forecast in forecast_data:
+    # Display forecast data
+    for i, forecast in enumerate(forecast_list):
         forecast_card = tk.Frame(right_weather, bg="#f0f0f0", highlightbackground="gray", 
                                 highlightthickness=1)
         forecast_card.pack(fill="x", pady=5, padx=5)
@@ -360,13 +434,61 @@ def create_weather_view():
         inner = tk.Frame(forecast_card, bg="#f0f0f0")
         inner.pack(fill="both", expand=True, padx=10, pady=10)
         
-        text_frame = tk.Frame(inner, bg="#f0f0f0")
-        text_frame.pack(side="left", fill="both", expand=True)
+        # Left side: Day and icon
+        left_forecast = tk.Frame(inner, bg="#f0f0f0")
+        left_forecast.pack(side="left", fill="y")
         
-        tk.Label(text_frame, text=forecast['day'], bg="#f0f0f0", 
-                font=("Arial", 12, "bold"), anchor="w").pack(fill="x")
-        tk.Label(text_frame, text=f"{forecast['temp']} - {forecast['condition']}", 
-                bg="#f0f0f0", font=("Arial", 10), anchor="w").pack(fill="x")
+        # Day name (short format)
+        day_name = forecast.get('day', 'Mon')
+        if len(day_name) > 3:
+            day_name = day_name[:3]  # Shorten to 3 letters
+        tk.Label(left_forecast, text=day_name, bg="#f0f0f0", 
+                font=("Arial", 12, "bold")).pack()
+        
+        # Load forecast weather icon
+        forecast_simple = forecast.get('simple', 'cloudy')
+        try:
+            icon_mapping = {
+                "sunny": "sunny_weather.png",
+                "partly cloudy": "partly_cloudy_weather.png",
+                "cloudy": "cloudy_weather.png",
+                "thunderstorm": "thunderstorm_weather.png"
+            }
+            
+            icon_filename = icon_mapping.get(forecast_simple, "cloudy_weather.png")
+            icon_path = os.path.join("weather_assets", icon_filename)
+            
+            if os.path.exists(icon_path):
+                icon_img = Image.open(icon_path)
+                # Smaller icon for forecast
+                icon_img = icon_img.resize((40, 40), Image.Resampling.LANCZOS)
+                forecast_icon = ImageTk.PhotoImage(icon_img)
+                tk.Label(left_forecast, image=forecast_icon, bg="#f0f0f0").pack(pady=(5, 0))
+                # Keep reference
+                forecast_card.forecast_icon = forecast_icon
+            else:
+                # Fallback text
+                tk.Label(left_forecast, text=forecast_simple[0].upper(), bg="#f0f0f0",
+                        font=("Arial", 12)).pack(pady=(5, 0))
+        except Exception as e:
+            print(f"[Weather] Error loading forecast icon: {e}")
+            # Fallback text
+            tk.Label(left_forecast, text=forecast_simple[0].upper(), bg="#f0f0f0",
+                    font=("Arial", 12)).pack(pady=(5, 0))
+        
+        # Right side: Temperature and description
+        right_forecast = tk.Frame(inner, bg="#f0f0f0")
+        right_forecast.pack(side="right", fill="both", expand=True)
+        
+        # Temperature
+        temp_val = forecast.get('temp', forecast.get('temp_day', 0))
+        tk.Label(right_forecast, text=f"{temp_val}°C", bg="#f0f0f0", 
+                font=("Arial", 14, "bold"), anchor="e").pack(anchor="e")
+        
+        # Description
+        forecast_desc = forecast.get('description', forecast_simple)
+        tk.Label(right_forecast, text=forecast_desc.title(), bg="#f0f0f0", 
+                font=("Arial", 10), anchor="e").pack(anchor="e")
     
     return frame
 
