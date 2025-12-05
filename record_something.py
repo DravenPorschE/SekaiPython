@@ -831,9 +831,8 @@ def process_ui_commands():
                 # Show the randomly chosen mood face
                 set_face_mood(mood)
                 
-                # Start recording after 3 seconds
-                if root and root.winfo_exists():
-                    root.after(3000, start_recording)
+                # Play random audio based on mood
+                play_mood_audio(mood)
                 
     except queue.Empty:
         pass
@@ -841,6 +840,69 @@ def process_ui_commands():
     # Schedule next check
     if root and root.winfo_exists():
         root.after(100, process_ui_commands)
+
+def play_mood_audio(mood):
+    """Play random audio file based on mood, then start recording"""
+    # Determine which folder to use based on mood
+    audio_folder = "voices_happy" if mood == "happy" else "voices_angry"
+    
+    print(f"[Audio] Playing random audio from {audio_folder}")
+    
+    try:
+        # Get list of audio files in the folder
+        if os.path.exists(audio_folder):
+            audio_files = [f for f in os.listdir(audio_folder) 
+                          if f.endswith('.wav') or f.endswith('.mp3')]
+            
+            if audio_files:
+                # Choose random audio file
+                random_audio = random.choice(audio_files)
+                audio_path = os.path.join(audio_folder, random_audio)
+                
+                print(f"[Audio] Playing: {random_audio}")
+                
+                # Play the audio using aplay (for WAV) or mpg321 (for MP3)
+                if audio_path.endswith('.wav'):
+                    play_command = f"aplay {audio_path}"
+                else:
+                    play_command = f"mpg321 {audio_path}"
+                
+                # Play audio in background
+                audio_process = subprocess.Popen(play_command, shell=True,
+                                                stdout=subprocess.PIPE,
+                                                stderr=subprocess.PIPE)
+                
+                # Estimate audio duration (assuming ~5 seconds)
+                audio_duration = 5.0  # seconds
+                
+                # Start recording after audio finishes
+                if root and root.winfo_exists():
+                    root.after(int(audio_duration * 1000), start_recording)
+                    
+                # Wait for audio to finish in background
+                def wait_for_audio():
+                    audio_process.wait()
+                    print("[Audio] Mood audio finished playing")
+                
+                wait_thread = threading.Thread(target=wait_for_audio, daemon=True)
+                wait_thread.start()
+                
+            else:
+                print(f"[Audio] No audio files found in {audio_folder}")
+                # Start recording immediately if no audio files
+                if root and root.winfo_exists():
+                    root.after(500, start_recording)  # Short delay
+        else:
+            print(f"[Audio] Folder not found: {audio_folder}")
+            # Start recording immediately if folder doesn't exist
+            if root and root.winfo_exists():
+                root.after(500, start_recording)  # Short delay
+                
+    except Exception as e:
+        print(f"[Audio] Error playing mood audio: {e}")
+        # Start recording anyway
+        if root and root.winfo_exists():
+            root.after(500, start_recording)
 
 def start_recording():
     """Start the recording sequence"""
@@ -879,9 +941,8 @@ def setup_keyboard_controls():
             # Show the randomly chosen mood face
             set_face_mood(mood)
             
-            # Start recording after 1 second (faster for manual test)
-            if root and root.winfo_exists():
-                root.after(1000, start_recording)
+            # Play random audio based on mood
+            play_mood_audio(mood)
         elif key == 'q':
             cleanup_and_exit()
     
