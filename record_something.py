@@ -16,10 +16,11 @@ from datetime import datetime
 import random
 import json
 
-from send_audio import transcribe_wav_file
+#from send_audio import transcribe_wav_file
 from ai_talk import getSekaiResponse
 from typecast_api import text_to_speech_api
 from get_intent import getSekaiIntent
+from whisper_audio_transcribe import transcribe_wav_file
 
 # ============================================================================
 # GLOBAL VARIABLES AND SHARED STATE
