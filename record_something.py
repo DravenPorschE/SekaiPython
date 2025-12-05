@@ -311,10 +311,12 @@ def create_face_view():
     
     return frame
 
-def create_weather_view(container, screen_width, screen_height):
+def create_weather_view():
     """Create weather view frame with real data"""
     # Try to load real weather data
     try:
+        from weather import get_weather_for_city_json
+        
         weather_data = get_weather_for_city_json("Lipa", units="metric")
         
         # Extract data
@@ -350,13 +352,13 @@ def create_weather_view(container, screen_width, screen_height):
         ]
     
     # Create the frame
-    weather_frame = tk.Frame(container, bg="white")
-    weather_frame.rowconfigure(0, weight=1)
-    weather_frame.columnconfigure(0, weight=1)
-    weather_frame.columnconfigure(1, weight=1)
+    frame = tk.Frame(container, bg="white")
+    frame.rowconfigure(0, weight=1)
+    frame.columnconfigure(0, weight=1)
+    frame.columnconfigure(1, weight=1)
     
     # Left panel - Current weather
-    left_weather = tk.Frame(weather_frame, bg="#f0f0f0", highlightbackground="gray", 
+    left_weather = tk.Frame(frame, bg="#f0f0f0", highlightbackground="gray", 
                            highlightthickness=1)
     left_weather.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
     
@@ -382,16 +384,13 @@ def create_weather_view(container, screen_width, screen_height):
         icon_path = os.path.join("weather_assets", icon_filename)
         
         if os.path.exists(icon_path):
-            from PIL import Image, ImageTk
             icon_img = Image.open(icon_path)
-            # Resize to fit - adjust size based on screen dimensions
-            icon_size = min(80, int(screen_width * 0.15))
-            icon_img = icon_img.resize((icon_size, icon_size), Image.Resampling.LANCZOS)
+            # Resize to fit - adjust size as needed
+            icon_img = icon_img.resize((80, 80), Image.Resampling.LANCZOS)
             weather_icon = ImageTk.PhotoImage(icon_img)
-            icon_label = tk.Label(temp_frame, image=weather_icon, bg="#f0f0f0")
-            icon_label.pack(side="left", padx=(0, 15))
+            tk.Label(temp_frame, image=weather_icon, bg="#f0f0f0").pack(side="left", padx=(0, 15))
             # Keep reference to prevent garbage collection
-            icon_label.image = weather_icon
+            temp_frame.weather_icon = weather_icon
         else:
             print(f"[Weather] Icon not found: {icon_path}")
             # Fallback text
@@ -420,7 +419,7 @@ def create_weather_view(container, screen_width, screen_height):
     details_frame.pack(pady=15, padx=10, fill="x")
     
     # Right panel - Forecast
-    right_weather = tk.Frame(weather_frame, bg="white")
+    right_weather = tk.Frame(frame, bg="white")
     right_weather.grid(row=0, column=1, sticky="nsew", padx=(0, 10), pady=10)
     
     # Forecast header
@@ -461,17 +460,13 @@ def create_weather_view(container, screen_width, screen_height):
             icon_path = os.path.join("weather_assets", icon_filename)
             
             if os.path.exists(icon_path):
-                from PIL import Image, ImageTk
                 icon_img = Image.open(icon_path)
                 # Smaller icon for forecast
-                forecast_icon_size = min(40, int(screen_width * 0.08))
-                icon_img = icon_img.resize((forecast_icon_size, forecast_icon_size), 
-                                          Image.Resampling.LANCZOS)
+                icon_img = icon_img.resize((40, 40), Image.Resampling.LANCZOS)
                 forecast_icon = ImageTk.PhotoImage(icon_img)
-                icon_label = tk.Label(left_forecast, image=forecast_icon, bg="#f0f0f0")
-                icon_label.pack(pady=(5, 0))
+                tk.Label(left_forecast, image=forecast_icon, bg="#f0f0f0").pack(pady=(5, 0))
                 # Keep reference
-                icon_label.image = forecast_icon
+                forecast_card.forecast_icon = forecast_icon
             else:
                 # Fallback text
                 tk.Label(left_forecast, text=forecast_simple[0].upper(), bg="#f0f0f0",
@@ -496,7 +491,7 @@ def create_weather_view(container, screen_width, screen_height):
         tk.Label(right_forecast, text=forecast_desc.title(), bg="#f0f0f0", 
                 font=("Arial", 10), anchor="e").pack(anchor="e")
     
-    return weather_frame
+    return frame
 
 # ============================================================================
 # FACE IMAGE FUNCTIONS
