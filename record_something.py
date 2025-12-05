@@ -14,6 +14,12 @@ import subprocess
 from PIL import Image, ImageTk
 from datetime import datetime
 import random
+import json
+
+from send_audio import transcribe_wav_file
+from ai_talk import getSekaiResponse
+from typecast_api import text_to_speech_api
+from get_intent import getSekaiIntent
 
 # ============================================================================
 # GLOBAL VARIABLES AND SHARED STATE
@@ -667,11 +673,14 @@ def record_audio():
                     file_size = os.path.getsize(recording_file)
                     print(f"[Recording] 📁 File size: {file_size} bytes")
                     
-                    # Play back the recording in separate thread
-                    playback_thread = threading.Thread(target=playback_audio, 
-                                                     args=(recording_file,), 
-                                                     daemon=True)
-                    playback_thread.start()
+                    sendAudioThread = threading.Thread(target=send_audio, args=(recording_file,), daemon=True)
+                    sendAudioThread.start()
+
+                    # # Play back the recording in separate thread
+                    # playback_thread = threading.Thread(target=playback_audio, 
+                    #                                  args=(recording_file,), 
+                    #                                  daemon=True)
+                    # playback_thread.start()
                 else:
                     print(f"[Recording] ❌ File not created")
             else:
@@ -695,6 +704,44 @@ def record_audio():
         if root and root.winfo_exists():
             set_face_mood("happy")
             update_title("Sekai is happy")
+
+def send_audio(recording_file):
+    # send audio to the server to trancsribe it
+    result = transcribe_wav_file(recording_file)
+    
+    if result:
+        print("Transcription:")
+        print(result)
+
+        API_KEY = "__pltMzLwjRtejoHYcjCEi984cBgKa6qMU6EiSkEs2Xne "  # Replace with your actual API key
+    
+        # Test text
+        #test_text = ai_response
+
+        ai_intent = getSekaiIntent(result)
+
+        print(ai_intent)
+        data = json.loads(ai_intent)  # Parse JSON string to dictionary
+        command_value = data["command"]  # Access the value
+
+        ai_response = getSekaiResponse(result, current_mood)
+
+        # Generate speech
+        audio_file = text_to_speech_api(ai_response, API_KEY)
+        
+        if audio_file and os.path.exists(audio_file):
+            print(f"\n🎵 To play the audio on Raspberry Pi:")
+            print(f"   aplay {audio_file}")
+            
+            # Optional: Play it automatically
+            import subprocess
+            try:
+                subprocess.run(['aplay', audio_file], check=True)
+            except:
+                print("   Could not play audio automatically")
+        
+        else:
+            print("Transcription failed.")
 
 def playback_audio(recording_file):
     """Play back recorded audio"""
