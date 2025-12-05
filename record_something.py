@@ -418,15 +418,13 @@ def create_weather_view():
     details_frame = tk.Frame(left_weather, bg="#f0f0f0")
     details_frame.pack(pady=15, padx=10, fill="x")
     
-    # Right panel - Forecast
+    # Right panel - Forecast (NO HEADER)
     right_weather = tk.Frame(frame, bg="white")
     right_weather.grid(row=0, column=1, sticky="nsew", padx=(0, 10), pady=10)
     
-    # Forecast header
-    tk.Label(right_weather, text="5-Day Forecast", bg="white", 
-             font=("Arial", 14, "bold")).pack(pady=(0, 10), anchor="w")
+    # REMOVED: "5-Day Forecast" header label
     
-    # Display forecast data
+    # Display forecast data - now we can fit 5 items
     for i, forecast in enumerate(forecast_list):
         forecast_card = tk.Frame(right_weather, bg="#f0f0f0", highlightbackground="gray", 
                                 highlightthickness=1)
