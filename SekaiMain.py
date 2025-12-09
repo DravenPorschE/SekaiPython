@@ -556,6 +556,30 @@ def load_image(image_name, screen_width=480, screen_height=320):
         print(f"Error loading image: {e}")
         return None
 
+# ============================================================================
+# UI FUNCTIONS (Main Thread Only)
+# ============================================================================
+def change_background_color(frames, color):
+    """Change the background color of the Tkinter window"""
+    print(f"[UI Thread] Changing background color to {color}")
+    
+    # Reset idle timer when there's user interaction
+    reset_idle_timer_ui(frames)
+    
+    # Change root window background
+    frames['root'].configure(bg=color)
+    
+    # Change container background
+    frames['container'].configure(bg=color)
+    
+    # Change current frame background based on view
+    if current_view == 'calendar':
+        frames['calendar'].configure(bg=color)
+    elif current_view == 'face':
+        frames['face'].configure(bg=color)
+    elif current_view == 'weather':
+        frames['weather'].configure(bg=color)
+
 def activate_sekai_ui(frames, mode="touch", emotion=None):
     """Activate Sekai - called from UI thread"""
     global fsr_is_active, current_view
@@ -563,6 +587,9 @@ def activate_sekai_ui(frames, mode="touch", emotion=None):
     print(f"\n{'🎯'*20}")
     print(f"🎯 SEKAI ACTIVATED via {mode.upper()}")
     print(f"{'🎯'*20}\n")
+    
+    # Reset idle timer when activated
+    reset_idle_timer_ui(frames)
     
     # Determine emotion
     if emotion is None:
@@ -574,8 +601,6 @@ def activate_sekai_ui(frames, mode="touch", emotion=None):
     # Switch to face view if not already
     if current_view != "face":
         switch_view_ui(frames, "face")
-    else:
-        reset_idle_timer_ui(frames)
     
     # Set the mood
     set_mood_ui(frames, emotion)
@@ -618,6 +643,9 @@ def deactivate_sekai_ui(frames):
     GPIO.output(LED_PIN, GPIO.LOW)
     print("Sekai deactivated")
     
+    # Reset idle timer when deactivated
+    reset_idle_timer_ui(frames)
+    
     # Reset to happy face after cooldown
     frames['root'].after(1000, lambda: set_mood_ui(frames, "happy"))
 
@@ -632,7 +660,7 @@ def set_mood_ui(frames, mood):
     current_mood = mood
     last_interaction_time = time.time()
     
-    # Reset idle state if we're setting a mood explicitly
+    # Reset idle state if we're setting a mood explicitly (not sleeping)
     if mood != "sleeping":
         is_idle = False
         idle_timer_start = None
@@ -697,31 +725,55 @@ def set_mood_ui(frames, mood):
     print(f"Mood set to: {mood}")
 
 def reset_idle_timer_ui(frames):
-    """Reset idle timer"""
+    """Reset idle timer - call this on ANY user interaction"""
     global sleep_timer_id, idle_timer_start, is_idle
     
+    # If already sleeping, wake up and reset
     if is_idle:
-        return
+        print("Waking up from sleep mode")
+        is_idle = False
+        # If in face view, set back to happy
+        if current_view == "face" and current_mood == "sleeping":
+            set_mood_ui(frames, "happy")
+        # If not in face view, just reset the timer
+        else:
+            switch_view_ui(frames, "face")
+            set_mood_ui(frames, "happy")
     
+    # Cancel any existing timer
     if sleep_timer_id:
         frames['root'].after_cancel(sleep_timer_id)
     
+    # Start new 20-second timer
     sleep_timer_id = frames['root'].after(20000, lambda: go_to_sleep_ui(frames))
     idle_timer_start = time.time()
-    print(f"Idle timer reset")
+    print(f"Idle timer reset - will sleep in 20 seconds if no interaction")
 
 def go_to_sleep_ui(frames):
-    """Go to sleep"""
-    global current_mood, is_idle, current_view
+    """Go to sleep after 20 seconds of inactivity"""
+    global is_idle
     
-    if current_view == "face" and current_mood != "sleeping":
-        print("20 seconds idle detected. Going to sleep...")
-        is_idle = True
-        set_mood_ui(frames, "sleeping")
+    print("20 seconds of inactivity detected. Going to sleep...")
+    is_idle = True
+    
+    # Switch to face view if not already
+    if current_view != "face":
+        switch_view_ui(frames, "face")
+    
+    # Set sleeping mood
+    set_mood_ui(frames, "sleeping")
+    
+    # Turn off LED when sleeping
+    GPIO.output(LED_PIN, GPIO.LOW)
+    
+    print("Sekai is now sleeping. Interact to wake up.")
 
 def switch_view_ui(frames, view):
     """Switch views"""
     global current_view
+    
+    # Reset idle timer when switching views
+    reset_idle_timer_ui(frames)
     
     current_view = view
     
@@ -737,14 +789,18 @@ def switch_view_ui(frames, view):
     elif view == 'face':
         frames['face'].grid(row=0, column=0, sticky="nsew")
         frames['root'].title("Sekai is listening...")
-        reset_idle_timer_ui(frames)
-        set_mood_ui(frames, "happy")
+        # Only set to happy if not sleeping
+        if not is_idle or current_mood != "sleeping":
+            set_mood_ui(frames, "happy")
     elif view == 'weather':
         frames['weather'].grid(row=0, column=0, sticky="nsew")
         frames['root'].title("Weather")
 
 def switch_view_key(event, frames):
     """Handle keyboard input"""
+    # Reset idle timer on any key press
+    reset_idle_timer_ui(frames)
+    
     key = event.char.lower()
     if key == 'a':
         switch_view_ui(frames, 'calendar')
